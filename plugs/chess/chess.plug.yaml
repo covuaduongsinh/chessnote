@@ -1,0 +1,14 @@
+name: chess
+functions:
+  fenWidget:
+    path: ./chess.ts:fenWidget
+    codeWidget: fen
+    renderMode: iframe
+  pgnWidget:
+    path: ./chess.ts:pgnWidget
+    codeWidget: pgn
+    renderMode: iframe
+  puzzleWidget:
+    path: ./chess.ts:puzzleWidget
+    codeWidget: puzzle
+    renderMode: iframe

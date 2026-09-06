@@ -338,7 +338,20 @@ export class ClientSystem {
   }
 
   async loadPlugFromPath(path: string, lastModified: number) {
-    await this.system.loadPlug(WorkerSandbox.forPath(path), path, lastModified);
+    try {
+      const file = await this.client.space.spacePrimitives.readFile(path);
+      await this.system.loadPlug(
+        WorkerSandbox.forData(file.data),
+        path,
+        lastModified,
+      );
+    } catch {
+      await this.system.loadPlug(
+        WorkerSandbox.forPath(path),
+        path,
+        lastModified,
+      );
+    }
   }
 
   async reloadPlugsFromSpace(space: Space) {

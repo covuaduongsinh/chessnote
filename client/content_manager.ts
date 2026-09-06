@@ -158,7 +158,7 @@ export class ContentManager {
               (meta) =>
                 this.adoptOwnWriteAsBase(
                   text,
-                  parsePageMetaLastModified(meta.lastModified),
+                  parsePageMetaLastModified(meta?.lastModified),
                 ),
               () => {}, // errors are reported by the .catch() below
             );
@@ -452,18 +452,18 @@ export class ContentManager {
     await this.refreshCurrentPageMeta(pageName, doc.meta);
 
     // When loading a different page OR if the page is read-only (in which case we don't want to apply local patches, because there's no point)
-    if (loadingDifferentPath || doc.meta.perm === "ro") {
+    if (loadingDifferentPath || doc.meta?.perm === "ro") {
       // Fresh state, nothing to diff against yet: doc.text *is* the new base.
       this.pendingExternal = undefined;
       this.lastKnownDiskText = doc.text;
       this.lastKnownDiskModified = parsePageMetaLastModified(
-        doc.meta.lastModified,
+        doc.meta?.lastModified,
       );
       const editorState = createEditorState(
         this.client,
         pageName,
         doc.text,
-        doc.meta.perm === "ro",
+        doc.meta?.perm === "ro",
       );
       this.client.editorView.setState(editorState);
       performance.mark("sb:page-content");
@@ -473,7 +473,7 @@ export class ContentManager {
       // updates it to doc.text itself.
       this.applyExternalPatches(
         doc.text,
-        parsePageMetaLastModified(doc.meta.lastModified),
+        parsePageMetaLastModified(doc.meta?.lastModified),
       );
     }
 
@@ -720,7 +720,7 @@ export class ContentManager {
     const pageName = getNameFromPath(path);
     const applied = this.applyExternalPatches(
       doc.text,
-      parsePageMetaLastModified(doc.meta.lastModified),
+      parsePageMetaLastModified(doc.meta?.lastModified),
       source,
     );
     if (!applied) {

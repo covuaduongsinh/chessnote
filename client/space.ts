@@ -307,7 +307,22 @@ export class Space {
 }
 
 export function fileMetaToPageMeta(fileMeta: FileMeta): PageMeta {
-  const name = fileMeta.name.substring(0, fileMeta.name.length - 3);
+  if (!fileMeta) {
+    return {
+      name: "",
+      ref: "",
+      tag: "page",
+      tags: [],
+      created: localDateString(new Date()),
+      lastModified: localDateString(new Date()),
+      perm: "rw",
+      size: 0,
+      contentType: "text/markdown",
+    } as PageMeta;
+  }
+  const name = fileMeta.name?.endsWith(".md")
+    ? fileMeta.name.substring(0, fileMeta.name.length - 3)
+    : fileMeta.name || "";
   try {
     return {
       ...fileMeta,
@@ -315,8 +330,8 @@ export function fileMetaToPageMeta(fileMeta: FileMeta): PageMeta {
       tag: "page",
       tags: [],
       name,
-      created: localDateString(new Date(fileMeta.created)),
-      lastModified: localDateString(new Date(fileMeta.lastModified)),
+      created: localDateString(new Date(fileMeta.created || Date.now())),
+      lastModified: localDateString(new Date(fileMeta.lastModified || Date.now())),
     } as PageMeta;
   } catch (e) {
     console.error("Failed to convert fileMeta to pageMeta", fileMeta, e);
@@ -325,13 +340,26 @@ export function fileMetaToPageMeta(fileMeta: FileMeta): PageMeta {
 }
 
 export function fileMetaToDocumentMeta(fileMeta: FileMeta): DocumentMeta {
+  if (!fileMeta) {
+    return {
+      name: "",
+      ref: "",
+      tag: "document",
+      created: localDateString(new Date()),
+      lastModified: localDateString(new Date()),
+      perm: "rw",
+      size: 0,
+      contentType: "application/octet-stream",
+      extension: "",
+    } as DocumentMeta;
+  }
   try {
     return {
       ...fileMeta,
       ref: fileMeta.name,
       tag: "document",
-      created: localDateString(new Date(fileMeta.created)),
-      lastModified: localDateString(new Date(fileMeta.lastModified)),
+      created: localDateString(new Date(fileMeta.created || Date.now())),
+      lastModified: localDateString(new Date(fileMeta.lastModified || Date.now())),
       // Name is always equal to the path for documents
       extension: getPathExtension(fileMeta.name as Path),
     } as DocumentMeta;

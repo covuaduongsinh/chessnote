@@ -174,11 +174,17 @@ function ActionButtons({
               e.stopPropagation();
               actionButton.callback(e.currentTarget as HTMLElement);
             }}
-            onBlur={() => {
+            onBlur={(e) => {
               if (mobileMenuStyle === "hamburger") {
-                document
-                  .querySelector("#sb-top .sb-actions.hamburger")
-                  ?.classList.remove("open");
+                const nextTarget = e.relatedTarget as HTMLElement | null;
+                if (nextTarget && e.currentTarget.parentElement?.contains(nextTarget)) {
+                  return;
+                }
+                setTimeout(() => {
+                  document
+                    .querySelector("#sb-top .sb-actions.hamburger")
+                    ?.classList.remove("open");
+                }, 200);
               }
             }}
             title={actionButton.description}

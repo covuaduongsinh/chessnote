@@ -3,7 +3,11 @@
   flex-direction: row;
   z-index: 20;
 
-  height: 55px;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  height: calc(55px + env(safe-area-inset-top, 0px));
+  box-sizing: border-box;
 
   .main {
     flex: 2;
@@ -172,8 +176,12 @@
       }
     }
 
+    &.open,
     &.open:hover {
       max-height: calc(100vh - 24px);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+      border-radius: 8px;
+      padding-bottom: 8px;
 
       button {
         opacity: 1;
@@ -186,9 +194,10 @@
     position: fixed;
     bottom: 0;
     left: 0;
-    padding: 10px 0;
+    padding: 10px env(safe-area-inset-right, 0px) calc(10px + env(safe-area-inset-bottom, 0px)) env(safe-area-inset-left, 0px);
     background: var(--top-background-color);
     width: 100vw;
+    box-sizing: border-box;
     box-shadow: 0px 4px 8px black;
     justify-content: space-around;
 

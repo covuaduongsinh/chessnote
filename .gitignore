@@ -36,3 +36,14 @@ AGENTS.md
 # Rust workspace build artifacts (Cargo.lock is intentionally tracked — this
 # workspace produces binaries)
 /target
+
+# Mobile / Capacitor build artifacts
+android/.gradle
+android/build
+android/app/build
+android/captures
+android/local.properties
+ios/App/build
+ios/App/Pods
+.omc
+my_space

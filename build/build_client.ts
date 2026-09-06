@@ -4,6 +4,7 @@ import * as esbuild from "esbuild";
 import * as sass from "sass";
 
 import { patchBundledJS } from "../client/plugos/plug_compile.ts";
+import { bundleAssets } from "../client/asset_bundle/builder.ts";
 
 // This builds the client and puts it into client_bundle/client
 
@@ -152,6 +153,125 @@ async function copyAssets(dist: string) {
     await writeFile(`${dist}/${output}`, compiled.css, "utf-8");
   }
 
+  // Generate manifest.json
+  const manifest = {
+    name: "ChessNote",
+    short_name: "ChessNote",
+    description: "ChessNote - Chess Knowledge & Study Base",
+    start_url: "./",
+    display: "standalone",
+    background_color: "#1e293b",
+    theme_color: "#1e293b",
+    icons: [
+      {
+        src: "favicon-96x96.png",
+        type: "image/png",
+        sizes: "96x96",
+      },
+      {
+        src: "logo.png",
+        type: "image/png",
+        sizes: "512x512",
+      },
+      {
+        src: "apple-touch-icon.png",
+        type: "image/png",
+        sizes: "180x180",
+      },
+    ],
+  };
+  await writeFile(
+    `${dist}/manifest.json`,
+    JSON.stringify(manifest, null, 2),
+    "utf-8",
+  );
+
+  // Generate default .config for offline/standalone mode
+  const defaultBootConfig = {
+    spaceFolderPath: "ChessNote",
+    indexPage: "INDEX",
+    readOnly: false,
+    enableClientEncryption: false,
+    spacePrefixes: [],
+  };
+  await writeFile(
+    `${dist}/.config`,
+    JSON.stringify(defaultBootConfig, null, 2),
+    "utf-8",
+  );
+
+  // Copy standard libraries base_fs to .fs for offline access
+  try {
+    await cp("client_bundle/base_fs", `${dist}/.fs`, { recursive: true });
+  } catch (e) {
+    console.warn("Could not copy base_fs to .fs:", e);
+  }
+
+  // Create base_fs.json bundle containing all plugs and initial space template
+  try {
+    const baseBundle = await bundleAssets("client_bundle/base_fs", ["**/*"]);
+    if (!baseBundle.has("INDEX.md")) {
+      baseBundle.writeTextFileSync(
+        "INDEX.md",
+        "text/markdown",
+        `# ♟️ Chào mừng đến với ChessNote
+
+Chào mừng bạn đến với **ChessNote** - Hệ thống ghi chú và nghiên cứu tri thức cờ vua chuyên sâu.
+
+## 🌟 Bàn cờ FEN tương tác
+\`\`\`fen
+r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4
+\`\`\`
+
+## ⚔️ Ván đấu PGN
+\`\`\`pgn
+[Event "FIDE World Championship 2024"]
+[Site "Singapore"]
+[Date "2024.12.12"]
+[White "Ding, Liren"]
+[Black "Gukesh, D"]
+[Result "0-1"]
+
+1. d4 Nf6 2. c4 e6 3. Nc3 Bb4 4. Qc2 O-O 5. a3 Bxc3+ 6. Qxc3 d5 0-1
+\`\`\`
+
+## 🧩 Bài tập Chiến thuật (Puzzle)
+\`\`\`puzzle
+fen: r1bqk2r/pp2bppp/2n1p3/2ppP3/3P4/2PB1N2/P1P2PPP/R1BQK2R w KQkq - 0 8
+turn: white
+solution: Bxh7+ Kxh7 Ng5+ Kg8 Qh5
+hint: Đòn thí Tượng kinh điển phá thành (Greek Gift Sacrifice)
+themes: Sacrifice, Attacking King
+\`\`\`
+`,
+      );
+    }
+    await writeFile(
+      `${dist}/base_fs.json`,
+      JSON.stringify(baseBundle.toJSON(), null, 2),
+      "utf-8",
+    );
+  } catch (e) {
+    console.warn("Could not create base_fs.json:", e);
+  }
+
+  // Generate static standalone index.html (with template variables cleaned)
+  let indexHtml = await readFile("client/html/index.html", "utf-8");
+  indexHtml = indexHtml.replaceAll(
+    '<base href="{{ host_prefix | safe }}/" />',
+    '<base href="./" />',
+  );
+  indexHtml = indexHtml.replaceAll("{{ host_prefix | safe }}", "");
+  indexHtml = indexHtml.replaceAll("{{ title }}", "ChessNote");
+  indexHtml = indexHtml.replaceAll(
+    "{{ description }}",
+    "ChessNote - Chess Knowledge & Study Base",
+  );
+  indexHtml = indexHtml.replaceAll("{{ additional_head_html | safe }}", "");
+  indexHtml = indexHtml.replaceAll("{{ content | safe }}", "");
+  indexHtml = indexHtml.replaceAll(".client/", "");
+  await writeFile(`${dist}/index.html`, indexHtml, "utf-8");
+
   // HACK: Patch the JS by removing an invalid regex
   let bundleJs = await readFile(`${dist}/client.js`, "utf-8");
   bundleJs = patchBundledJS(bundleJs);
@@ -196,6 +316,13 @@ async function patchServiceWorker() {
   swCode = swCode.replaceAll("{{CACHE_NAME}}", `cache-${Date.now()}`);
   swCode = swCode.replaceAll("{{PRECACHE_FILES}}", precacheFilesStr);
   await writeFile("client_bundle/client/service_worker.js", swCode, "utf-8");
+  await writeFile(`${clientDir}/service_worker.js`, swCode, "utf-8");
+  try {
+    await cp(
+      "client_bundle/client/service_worker.js.map",
+      `${clientDir}/service_worker.js.map`,
+    );
+  } catch {}
 }
 
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);

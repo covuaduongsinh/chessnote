@@ -1,4 +1,5 @@
 import type { SpacePrimitives } from "./space_primitives.ts";
+import mime from "mime";
 import { encodePageURI } from "@silverbulletmd/silverbullet/lib/ref";
 import { flushCachesAndUnregisterServiceWorker } from "../../client/service_worker/util.ts";
 import type { FileMeta } from "@silverbulletmd/silverbullet/type/index";
@@ -227,7 +228,16 @@ export class HttpSpacePrimitives implements SpacePrimitives {
     });
 
     await this.validateSpacePathFromHeaders(resp);
-    return resp.json();
+    try {
+      const text = await resp.text();
+      if (!text || text.trim() === "") {
+        return [];
+      }
+      return JSON.parse(text);
+    } catch (e: any) {
+      console.warn("Could not parse file list JSON, returning empty list:", e);
+      return [];
+    }
   }
 
   /**
@@ -268,9 +278,17 @@ export class HttpSpacePrimitives implements SpacePrimitives {
     if (res.status === 404) {
       throw notFoundError;
     }
+    const headerMeta = headersToFileMeta(path, res.headers);
     return {
       data: new Uint8Array(await res.arrayBuffer()),
-      meta: headersToFileMeta(path, res.headers)!,
+      meta: headerMeta || {
+        name: path,
+        created: Date.now(),
+        lastModified: Date.now(),
+        perm: "rw",
+        size: 0,
+        contentType: mime.getType(path) || "application/octet-stream",
+      },
       remoteHash: hashFromEtag(res.headers.get("ETag")),
     };
   }
@@ -324,8 +342,16 @@ export class HttpSpacePrimitives implements SpacePrimitives {
     if (res.status === 412) {
       throw new PreconditionFailedError(`Precondition failed for ${path}`);
     }
+    const headerMeta = headersToFileMeta(path, res.headers);
     return {
-      meta: headersToFileMeta(path, res.headers)!,
+      meta: headerMeta || meta || {
+        name: path,
+        created: Date.now(),
+        lastModified: Date.now(),
+        perm: "rw",
+        size: data.byteLength,
+        contentType: mime.getType(path) || "application/octet-stream",
+      },
       remoteHash: hashFromEtag(res.headers.get("ETag")),
     };
   }
@@ -395,7 +421,17 @@ export class HttpSpacePrimitives implements SpacePrimitives {
     if (!res.ok) {
       throw new Error(`Failed to get file meta: ${res.statusText}`);
     }
-    return headersToFileMeta(path, res.headers)!;
+    const headerMeta = headersToFileMeta(path, res.headers);
+    return (
+      headerMeta || {
+        name: path,
+        created: Date.now(),
+        lastModified: Date.now(),
+        perm: "rw",
+        size: 0,
+        contentType: mime.getType(path) || "application/octet-stream",
+      }
+    );
   }
 
   // If not: throws an error or invokes a redirect

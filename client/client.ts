@@ -8,7 +8,8 @@ import type { Compartment, EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { jitter, sleep } from "@silverbulletmd/silverbullet/lib/async";
-import { deriveDbName } from "@silverbulletmd/silverbullet/lib/crypto";
+import { base64Decode, deriveDbName } from "@silverbulletmd/silverbullet/lib/crypto";
+import { DataStoreSpacePrimitives } from "./spaces/datastore_space_primitives.ts";
 import {
   encodePageURI,
   encodeRef,
@@ -427,9 +428,57 @@ export class Client {
       "editor",
     );
 
+    // If local IndexedDB storage has no files, seed default base files & plugs
+    const localStore = new DataStoreSpacePrimitives(this.ds.kv);
+    const existingFiles = await localStore.fetchFileList();
+    if (existingFiles.length === 0) {
+      console.log("Seeding initial offline space from base_fs.json...");
+      try {
+        const resp = await fetch(
+          new URL("base_fs.json", document.baseURI).href,
+        );
+        if (resp.ok) {
+          const text = await resp.text();
+          if (text && text.trim() !== "") {
+            const bundleJson: Record<string, { data: string; mtime: number }> =
+              JSON.parse(text);
+            for (const [path, entry] of Object.entries(bundleJson)) {
+              const base64Data = entry.data.split(",", 2)[1];
+              const data = base64Decode(base64Data);
+              await localStore.writeFile(path, data, {
+                name: path,
+                created: entry.mtime || Date.now(),
+                lastModified: entry.mtime || Date.now(),
+                perm: "rw",
+                size: data.length,
+                contentType: path.endsWith(".js")
+                  ? "application/javascript"
+                  : "text/markdown",
+              });
+            }
+            console.log(
+              `Seeding complete! Initialized ${
+                Object.keys(bundleJson).length
+              } offline files.`,
+            );
+          }
+        }
+      } catch (e) {
+        console.warn("Could not seed initial offline space:", e);
+      }
+    }
+
+    const isCapacitor =
+      typeof (window as any).Capacitor !== "undefined" ||
+      !!(window as any).silverbullet?.offlineOnly;
+
+    const underlyingPrimitives = isCapacitor
+      ? localStore
+      : this.httpSpacePrimitives;
+
     this.eventedSpacePrimitives = new EventedSpacePrimitives(
       new CheckedSpacePrimitives(
-        this.httpSpacePrimitives,
+        underlyingPrimitives,
         this.bootConfig.readOnly,
       ),
       this.eventHook,

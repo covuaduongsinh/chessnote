@@ -488,19 +488,74 @@ export class MainUI {
             }
           }}
           actionButtons={[
-            ...(viewState.isMobile &&
-            client.config
-              .get<string>("mobileMenuStyle", "hamburger")
-              .includes("hamburger")
+            ...(viewState.isMobile
               ? [
                   {
                     icon: featherIcons.Menu,
-                    description: "Open Menu",
+                    description: "ChessNote Menu & Actions",
                     class: "expander",
+                    dropdown: false,
                     callback: () => {
-                      document
-                        .querySelector("#sb-top .sb-actions.hamburger")
-                        ?.classList.toggle("open");
+                      const menuOptions = [
+                        {
+                          name: "⚡ Bảng lệnh (Command Palette)...",
+                          run: () => client.startCommandPalette(),
+                        },
+                        {
+                          name: "📖 Chọn & Mở trang (Open Page)...",
+                          run: () => client.startPageNavigate("page"),
+                        },
+                        {
+                          name: "🏠 Về trang chủ (Home: INDEX)",
+                          run: () =>
+                            client.navigate({ path: "INDEX.md" as any }),
+                        },
+                        {
+                          name: "♟️ Chèn thế cờ FEN (Insert Position)",
+                          run: () =>
+                            client
+                              .runCommandByName("Chess: Insert Position (FEN)")
+                              .catch(() => client.startCommandPalette()),
+                        },
+                        {
+                          name: "⚔️ Chèn ván cờ PGN (Insert Game)",
+                          run: () =>
+                            client
+                              .runCommandByName("Chess: Insert Game (PGN)")
+                              .catch(() => client.startCommandPalette()),
+                        },
+                        {
+                          name: "🧩 Chèn bài tập cờ thế (Insert Puzzle)",
+                          run: () =>
+                            client
+                              .runCommandByName("Chess: Insert Puzzle")
+                              .catch(() => client.startCommandPalette()),
+                        },
+                        {
+                          name: "➕ Tạo trang ghi chú mới (New Note)",
+                          run: () => client.startPageNavigate("page"),
+                        },
+                        {
+                          name: "🔄 Tải lại Plugs & Dữ liệu (Reload Plugs)",
+                          run: () => client.loadPlugs(),
+                        },
+                      ];
+
+                      void client.ui
+                        .filterBox(
+                          "ChessNote Menu",
+                          menuOptions.map((opt) => ({ name: opt.name })),
+                          "Tìm kiếm lệnh hoặc thao tác...",
+                        )
+                        .then((selected) => {
+                          if (!selected) return;
+                          const chosen = menuOptions.find(
+                            (opt) => opt.name === selected.name,
+                          );
+                          if (chosen) {
+                            chosen.run();
+                          }
+                        });
                     },
                   },
                 ]

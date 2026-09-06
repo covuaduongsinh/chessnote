@@ -32,6 +32,14 @@ export class WorkerSandbox<HookT> implements Sandbox<HookT> {
       );
   }
 
+  static forData<HookT>(data: Uint8Array): SandboxFactory<HookT> {
+    return (plug) => {
+      const blob = new Blob([data as any], { type: "application/javascript" });
+      const blobUrl = URL.createObjectURL(blob);
+      return new WorkerSandbox(plug, new URL(blobUrl));
+    };
+  }
+
   /**
    * Should only invoked lazily (either by invoke, or by a ManifestCache to load the manifest)
    */
@@ -138,6 +146,9 @@ export class WorkerSandbox<HookT> implements Sandbox<HookT> {
     if (this.worker) {
       this.worker.terminate();
       this.worker = undefined;
+    }
+    if (this.workerUrl.protocol === "blob:") {
+      URL.revokeObjectURL(this.workerUrl.href);
     }
     // A terminated worker will never post the `invr` that would otherwise
     // settle these.

@@ -93,7 +93,17 @@ safeRun(async () => {
       // Custom configuration
       cachedFetch(".fs/CONFIG.md"),
     ]);
-    bootConfig = JSON.parse(configJSONText);
+    if (!configJSONText || configJSONText.trim() === "") {
+      bootConfig = {
+        spaceFolderPath: "ChessNote",
+        indexPage: "INDEX",
+        readOnly: false,
+        enableClientEncryption: false,
+        spacePrefixes: [],
+      };
+    } else {
+      bootConfig = JSON.parse(configJSONText);
+    }
   } catch (e: any) {
     if (e.message === offlineError.message) {
       alert(
