@@ -45,5 +45,11 @@ android/captures
 android/local.properties
 ios/App/build
 ios/App/Pods
+
+# Tauri desktop build artifacts (Cargo.lock is intentionally tracked, same
+# policy as the root workspace — this crate also produces a binary)
+desktop/src-tauri/target
+desktop/src-tauri/gen
+
 .omc
 my_space

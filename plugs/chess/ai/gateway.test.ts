@@ -28,7 +28,13 @@ describe("ChessNote AI Gateway & Subscription Tests", () => {
     expect(manager.canMakeRequest("user_tester")).toBe(true);
   });
 
-  test("AiGatewayRouter routes coach requests and returns GM analysis", async () => {
+  // NOTE: AiGatewayRouter.handleRequest() is currently a STUB (see
+  // server/ai-gateway/router.ts) — it never calls a real LLM. This test only
+  // verifies the stub's own fixed placeholder output and quota bookkeeping,
+  // not real AI behavior. It is not reachable from the UI yet either (see
+  // docs/plans/2026-09-07-danh-gia-va-ke-hoach-hoan-thien-chessnote.md,
+  // Giai đoạn 3, for the plan to make this real).
+  test("AiGatewayRouter (stub) returns the placeholder response and tracks quota", async () => {
     const manager = new QuotaManager();
     const router = new AiGatewayRouter(manager);
 
@@ -41,7 +47,7 @@ describe("ChessNote AI Gateway & Subscription Tests", () => {
 
     expect(res.success).toBe(true);
     expect(res.modelUsed).toBe("claude");
-    expect(res.content).toContain("Phân tích bởi Grandmaster AI");
+    expect(res.content).toContain("STUB — chưa kết nối AI thật");
     expect(res.remainingQuota).toBe(49);
   });
 });

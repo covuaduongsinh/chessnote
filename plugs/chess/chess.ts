@@ -13,7 +13,15 @@ function escapeHtml(str: string): string {
 }
 
 /**
- * FEN Code Widget with Arasan/Engine Live Evaluation
+ * FEN Code Widget with a heuristic material/position evaluation.
+ *
+ * NOTE: there is no real chess engine wired in yet (no Arasan/Stockfish
+ * binary or WASM). The "Engine Eval" button and score shown here come from
+ * evaluatePositionHeuristic() in engine/game_reviewer.ts — a hand-rolled
+ * material + center-control heuristic, not actual engine search. Label it
+ * honestly in the UI until a real engine is integrated (see
+ * docs/plans/2026-09-07-danh-gia-va-ke-hoach-hoan-thien-chessnote.md, Giai
+ * đoạn 2).
  */
 export async function fenWidget(bodyText: string, _pageName: string) {
   const lines = bodyText.trim().split("\n");
@@ -56,7 +64,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
 <div class="chessnote-container" id="${widgetId}">
   <div class="chess-header">
     <div class="chess-title">${escapeHtml(title)}</div>
-    <div class="chess-subtitle">FEN Interactive Board • Arasan Engine Ready</div>
+    <div class="chess-subtitle">FEN Interactive Board • Heuristic Eval (no engine)</div>
   </div>
   <div class="chessnote-layout">
     <div class="chessnote-board-container">
@@ -79,7 +87,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
       </div>
       <div class="chess-engine-panel" id="${widgetId}_engine_panel" style="display: none;">
         <div class="engine-line">
-          <span>Engine: <strong>Arasan Engine</strong></span>
+          <span>Engine: <strong>Heuristic (no real engine yet)</strong></span>
           <span class="engine-score" id="${widgetId}_engine_score">Eval: 0.0</span>
         </div>
         <div class="engine-line">
@@ -335,7 +343,9 @@ export async function fenWidget(bodyText: string, _pageName: string) {
 }
 
 /**
- * PGN Code Widget with Automated Game Review & Live Arasan Engine Eval
+ * PGN Code Widget with automated game review (heuristic) & a live heuristic
+ * eval bar. See the note on fenWidget above: no real chess engine is wired
+ * in yet, this is not Arasan/Stockfish analysis.
  */
 export async function pgnWidget(bodyText: string, _pageName: string) {
   let chess: Chess;
@@ -399,7 +409,7 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
 
       <div class="chess-engine-panel" id="${widgetId}_engine_panel" style="display: none;">
         <div class="engine-line">
-          <span>Engine: <strong>Arasan Engine</strong></span>
+          <span>Engine: <strong>Heuristic (no real engine yet)</strong></span>
           <span class="engine-score" id="${widgetId}_engine_score">Eval: 0.0</span>
         </div>
       </div>

@@ -27,7 +27,13 @@ export class AiGatewayRouter {
   constructor(private quotaManager: QuotaManager) {}
 
   /**
-   * Routes the request to the optimal LLM backend
+   * STUB — does not call any real LLM yet. `promptText` below is built but
+   * never sent anywhere; this always returns the same hardcoded sample
+   * response regardless of input. Not wired into the UI (plugs/chess/) or
+   * into the Rust server (no route in server/src/router.rs) — currently
+   * unreachable dead code. See
+   * docs/plans/2026-09-07-danh-gia-va-ke-hoach-hoan-thien-chessnote.md,
+   * Giai đoạn 3, for the real subscription-bridge implementation plan.
    */
   async handleRequest(req: AgentRequest): Promise<AgentResponse> {
     const user = this.quotaManager.getUser(req.userId);
@@ -68,13 +74,13 @@ export class AiGatewayRouter {
 
     const promptText = `${systemPrompt}\n\n${contextParts.join("\n\n")}`;
 
-    // Return structured response
+    // STUB response — not a real LLM call, see class doc comment above.
     return {
       success: true,
-      content: `[Phân tích bởi Grandmaster AI - ${model.toUpperCase()}]\n\n` +
+      content: `[⚠️ STUB — chưa kết nối AI thật (${model.toUpperCase()})]\n\n` +
         `Thế cờ FEN: ${req.fen || "N/A"}\n\n` +
-        `💡 **Nhận xét chuyên môn**: Trắng đang chiếm ưu thế trung tâm nhờ cặp tốt d4-e4 mạnh mẽ. ` +
-        `Kế hoạch tiếp theo nên là đưa Mã lên f3 và chuẩn bị đòn đẩy tốt mở cột tấn công cánh vua.`,
+        `Đây là phản hồi mẫu cố định để phát triển giao diện, không phải phân tích thật. ` +
+        `Xem docs/plans/2026-09-07-danh-gia-va-ke-hoach-hoan-thien-chessnote.md (Giai đoạn 3).`,
       modelUsed: model,
       remainingQuota: user.monthlyLimit - user.monthlyQueriesUsed,
       tier: user.tier,
