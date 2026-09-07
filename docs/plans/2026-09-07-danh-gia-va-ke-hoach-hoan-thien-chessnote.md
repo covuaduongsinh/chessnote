@@ -381,6 +381,84 @@ chạy được").
   báo lỗi rõ ràng thay vì âm thầm treo hoặc giả vờ đúng (đúng nguyên tắc "không nuốt lỗi im
   lặng" đặt ra từ Giai đoạn 0).
 
+## 3c. NHẬT KÝ TRIỂN KHAI — Giai đoạn 2 (Arasan WASM thật, đã tích hợp vào UI)
+
+> Cập nhật 2026-09-07. Tiếp nối 3b: dựng pipeline build Emscripten cho Arasan (MIT, NNUE),
+> sau đó nối kết quả thật vào `chess.ts` (nút "⚡ Engine Eval" của `fenWidget`) — thay cho
+> việc chỉ chứng minh engine build/chạy được trong một harness thử nghiệm độc lập.
+
+**Pipeline build** (tóm tắt, chi tiết đầy đủ nằm trong lịch sử thao tác của phiên): clone
+`jdart1/arasan-chess` (MIT) kèm submodule Fathom (Syzygy tablebase), cài Emscripten SDK, build
+bằng `emcmake`/`emmake` với cấu hình mặc định (giữ `SYZYGY_TBS=ON`, KHÔNG dùng `OLD=ON` vì lớp
+NNUE sparse-input của Arasan không có fallback không-SIMD — `static_assert` sẽ chặn biên dịch),
+thêm cờ `-msimd128` để Emscripten biên dịch thẳng các x86 SSE/SSSE3/SSE4.1 intrinsic có sẵn
+trong code Arasan sang WASM SIMD128 mà **không cần sửa 1 dòng source nào**. Link với
+`-sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=ArasanModule -sENVIRONMENT=worker
+-sEXPORTED_RUNTIME_METHODS=FS,callMain -sINVOKE_RUN=0 -sALLOW_MEMORY_GROWTH=1
+-sINITIAL_MEMORY=67108864 -sSTACK_SIZE=8388608` để ra một ES6 module chạy được trong Web
+Worker (không phải browser tab/Node) — `ENVIRONMENT=worker` để tránh code dò môi trường thừa,
+`INVOKE_RUN=0` + gọi `Module.callMain([])` thủ công để trì hoãn `main()` tới khi đã ghi xong
+file NNUE vào MEMFS ảo, `ALLOW_MEMORY_GROWTH`/`INITIAL_MEMORY`/`STACK_SIZE` để tránh
+`Aborted(OOM)` lúc chạy thật. Đã kiểm chứng build này chạy đúng trong một Web Worker thật của
+Chrome (harness độc lập, script tại `scratchpad/arasan-test/`) trước khi đưa vào plug.
+
+**Kiến trúc lưu trữ file engine**: `arasan.wasm` (925KB) và `arasanv8-20260906.nnue` (~25MB)
+được đặt tại `libraries/Library/Chess/`, đọc lúc chạy qua `space.readFile()` trong
+`plugs/chess/engine/arasan_engine.ts` — **không** nhúng bằng `assets:` của plug (esbuild sẽ
+base64 hoá rồi nhúng thẳng vào bundle JS, không phù hợp với file nhị phân 26MB).
+
+⚠️ **Phát hiện quan trọng lúc kiểm chứng qua trình duyệt thật, làm sai một giả định kiến trúc
+ban đầu**: kế hoạch gốc (và comment trong `arasan_engine.ts` bản đầu) giả định
+`libraries/Library/Chess/` là một Library **tùy chọn, cài thêm sau** qua "Libraries: Manager",
+giữ cho plug `chess` luôn nhẹ. **Thực tế không phải vậy** — `build/build_plugs.ts` copy toàn
+bộ `libraries/Library/` vào `client_bundle/base_fs`, và `bin/silverbullet/src/embed.rs`
+(`#[derive(RustEmbed)]` trên `client_bundle/base_fs`) nhúng thẳng thư mục đó vào **chính binary
+server** làm một lớp nền chỉ-đọc (`perm: "ro"`) luôn được mount bên dưới mọi Space — đã kiểm
+chứng bằng cách trỏ server vào một Space hoàn toàn trống (chỉ 1 file `.md` mới tạo) và thấy
+`Library/Chess/arasan.wasm` vẫn liệt kê được và đọc được qua `GET /.fs/Library/Chess/arasan.wasm`.
+Nói cách khác: **bản build ChessNote chuẩn hiện tại luôn mang theo ~26MB dữ liệu engine trong
+chính file `.exe`, không có bước "cài thêm" nào cả** — đúng với quyết định đã chốt "vẫn dùng
+NNUE đầy đủ vì chất lượng", nhưng khác với mô tả "Library tùy chọn" trong tài liệu/code cũ.
+Đã sửa lại comment đầu `arasan_engine.ts`, thông điệp `EngineNotInstalledError`, và
+`libraries/Library/Chess.md` cho khớp thực tế — lỗi "chưa cài engine" giờ chỉ còn là lớp phòng
+thủ cho trường hợp build tùy chỉnh đã lược bỏ `libraries/Library/Chess` trước khi biên dịch.
+
+⚠️ **Bug nghiêm trọng thứ hai phát hiện khi kiểm chứng trực tiếp (không lộ ra khi chỉ test
+bằng Node)**: UCI batch gửi cho Arasan ban đầu là
+`uci\nisready\nposition fen ...\ngo depth 12\nquit\n` — gửi cả `quit` NGAY trong cùng một hàng
+đợi `stdin()` đồng bộ với lệnh `go`. Arasan (giống nhiều engine UCI khác) kiểm tra stdin để bắt
+lệnh ngắt (`stop`/`quit`) giữa các vòng lặp sâu dần (iterative deepening); vì hàm `stdin()` của
+ta để lộ toàn bộ hàng đợi ngay từ đầu, engine "nhìn thấy" `quit` đang chờ và luôn dừng tìm kiếm
+ở **depth 1** bất kể `depth` yêu cầu là bao nhiêu — tái hiện được 100% cả trên vị trí Greek Gift
+lẫn một vị trí khai cuộc bình thường, bằng harness Node độc lập lẫn trên trình duyệt thật. Kết
+quả trả về (nước đi, dấu điểm) vẫn "trông hợp lý" nên rất dễ bị bỏ qua nếu không nhìn kỹ trường
+`depth` — đây chính là kiểu lỗi "trông như chạy được nhưng chất lượng phân tích giả" mà toàn bộ
+đợt audit này đang cố loại bỏ. **Đã sửa**: bỏ hẳn `quit` khỏi hàng đợi ban đầu — khi `stdin()`
+trả hết ký tự (EOF) sau khi in xong `bestmove`, Arasan tự thoát vòng lặp chính giống hệt như
+nhận được `quit` tường minh (đã kiểm chứng bằng harness Node so sánh hai bên: có `quit` → luôn
+dừng ở depth 1; không có `quit` → tìm đủ tới depth 12, ví dụ ván khai cuộc sau 1.e4 đạt depth 12
+với 39924 node, `bestmove c7c5`). Test qua trình duyệt thật sau khi sửa: vị trí Greek Gift
+`5rk1/5ppp/8/8/8/3B1N2/8/3QKR2 w - - 0 1` cho **"Arasan eval: +33.6 (depth 12), best move
+f3g5"** — đúng chuỗi tấn công buộc, đủ độ sâu yêu cầu.
+
+**Kiểm chứng qua trình duyệt thật**: cài `chess.plug.yaml` syscall `chessEngineEval`, gọi
+`syscall("chess.engineEval", fen, 12)` từ nút "⚡ Engine Eval" của `fenWidget`. Xác nhận bằng
+cả hai đường: bấm nút thật (đã phát hiện một cạm bẫy công cụ — click theo toạ độ pixel qua
+Chrome DevTools Protocol có thể trượt mất phần tử `<button>` nằm bên trong iframe sandbox
+`renderMode: iframe`, không báo lỗi gì mà chỉ lặng lẽ không làm gì; phải xác minh bằng cách gọi
+`iframe.contentDocument.querySelector('.btn-engine').click()` trực tiếp qua `javascript_tool`
+khi nghi ngờ) và bằng harness Node độc lập gọi thẳng `evalPosition()`. Cả hai đều cho kết quả
+khớp nhau.
+
+**Bàn giao (chưa làm trong đợt này, ghi nhận là phạm vi còn lại)**: `pgnWidget`'s "Engine Eval"
+riêng và `engine/game_reviewer.ts`'s heuristic chấm điểm cả ván (`reviewGame()`) vẫn dùng
+`evaluatePositionHeuristic()` cũ, chưa nối sang Arasan thật — nhãn UI của `pgnWidget` cố tình
+**giữ nguyên** "Heuristic (no real engine yet)" cho trung thực với hiện trạng. Lý do để lại:
+chạy Arasan (khởi tạo module WASM mới + nạp lại NNUE 25MB) cho **từng nước đi** trong một ván
+dài sẽ rất chậm nếu làm ngây thơ — cần thiết kế lại (ví dụ: giữ một module instance sống xuyên
+suốt ván thay vì tạo mới mỗi lần gọi `evalPosition()`) trước khi wiring, nằm ngoài phạm vi
+"tích hợp nút Engine Eval" của lượt này.
+
 ---
 
 ## 4. RỦI RO & LƯU Ý VẬN HÀNH

@@ -102,15 +102,15 @@ export function applySan(
 }
 
 /**
- * FEN Code Widget with a heuristic material/position evaluation.
+ * FEN Code Widget with a real Arasan (NNUE, WASM) engine evaluation.
  *
- * NOTE: there is no real chess engine wired in yet (no Arasan/Stockfish
- * binary or WASM). The "Engine Eval" button and score shown here come from
- * evaluatePositionHeuristic() in engine/game_reviewer.ts — a hand-rolled
- * material + center-control heuristic, not actual engine search. Label it
- * honestly in the UI until a real engine is integrated (see
+ * The "Engine Eval" button calls the chess.engineEval syscall, backed by
+ * engine/arasan_engine.ts, which runs the real Arasan UCI engine compiled to
+ * WebAssembly. Requires the optional "Chess Engine" Library to be installed
+ * in the Space (see EngineNotInstalledError in arasan_engine.ts); the panel
+ * surfaces that error message when it isn't. See
  * docs/plans/2026-09-07-danh-gia-va-ke-hoach-hoan-thien-chessnote.md, Giai
- * đoạn 2).
+ * đoạn 2.
  */
 export async function fenWidget(bodyText: string, _pageName: string) {
   const lines = bodyText.trim().split("\n");
@@ -156,7 +156,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
 <div class="chessnote-container" id="${widgetId}">
   <div class="chess-header">
     <div class="chess-title">${escapeHtml(title)}</div>
-    <div class="chess-subtitle">FEN Interactive Board • Heuristic Eval (no engine)</div>
+    <div class="chess-subtitle">FEN Interactive Board • Arasan Engine (NNUE, WASM)</div>
   </div>
   <div class="chessnote-layout">
     <div class="chessnote-board-container">
@@ -180,7 +180,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
       </div>
       <div class="chess-engine-panel" id="${widgetId}_engine_panel" style="display: none;">
         <div class="engine-line">
-          <span>Engine: <strong>Heuristic (no real engine yet)</strong></span>
+          <span>Engine: <strong>Arasan (NNUE, WASM)</strong></span>
           <span class="engine-score" id="${widgetId}_engine_score">Eval: 0.0</span>
         </div>
         <div class="engine-line">
@@ -285,31 +285,50 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     return board;
   }
 
-  function evaluateFast(f) {
-    const board = parseFenBoard(f);
-    const pieceVals = { P: 100, N: 320, B: 330, R: 500, Q: 900, K: 20000 };
-    let score = 0;
-    for (const [sq, p] of Object.entries(board)) {
-      const isW = p[0] === "w";
-      const type = p[1];
-      const val = pieceVals[type] || 0;
-      score += isW ? val : -val;
-    }
-    return score;
-  }
+  // Real Arasan (NNUE, WASM) analysis via the chess.engineEval syscall — see
+  // plugs/chess/engine/arasan_engine.ts. Requires the optional "Chess
+  // Engine" Library to be installed (~26MB: engine + neural network); if
+  // it isn't, the syscall rejects and we show that plainly instead of
+  // silently falling back to a fake number.
+  let lastEvalFen = null;
+  let evalRequestSeq = 0;
 
-  function updateEngineEval() {
+  async function updateEngineEval() {
     if (!isEngineOn) return;
-    const score = evaluateFast(currentFen);
-    const pawns = (score / 100).toFixed(1);
-    const scoreStr = score > 0 ? "+" + pawns : pawns;
-    
-    engineScoreEl.innerText = "Eval: " + scoreStr;
-    evalTextEl.innerText = scoreStr;
-    
-    // Win chance to height %
-    const winChance = 100 / (1 + Math.exp(-0.00368208 * score));
-    evalFillEl.style.height = Math.max(5, Math.min(95, winChance)) + "%";
+    if (currentFen === lastEvalFen) return;
+    const mySeq = ++evalRequestSeq;
+    engineScoreEl.innerText = "Đang phân tích...";
+    bestMoveEl.innerText = "…";
+    try {
+      const result = await syscall("chess.engineEval", currentFen, 12);
+      if (mySeq !== evalRequestSeq) return; // a newer position was requested meanwhile
+      lastEvalFen = currentFen;
+      let scoreStr;
+      let winChance;
+      if (result.mateIn !== null && result.mateIn !== undefined) {
+        scoreStr = (result.mateIn > 0 ? "M" + result.mateIn : "-M" + Math.abs(result.mateIn));
+        winChance = result.mateIn > 0 ? 99 : 1;
+      } else {
+        const cp = result.scoreCp || 0;
+        const pawns = (cp / 100).toFixed(1);
+        scoreStr = cp > 0 ? "+" + pawns : String(pawns);
+        winChance = 100 / (1 + Math.exp(-0.00368208 * cp));
+      }
+      engineScoreEl.innerText = "Arasan eval: " + scoreStr + (result.depth ? " (depth " + result.depth + ")" : "");
+      evalTextEl.innerText = scoreStr;
+      bestMoveEl.innerText = result.bestMove || "-";
+      evalFillEl.style.height = Math.max(5, Math.min(95, winChance)) + "%";
+      currentBestMove = result.bestMove && result.bestMove.length >= 4
+        ? result.bestMove.slice(0, 2) + "-" + result.bestMove.slice(2, 4)
+        : null;
+      renderArrows();
+    } catch (e) {
+      if (mySeq !== evalRequestSeq) return;
+      lastEvalFen = null;
+      engineScoreEl.innerText = "⚠️ " + (e && e.message ? e.message : "Không thể phân tích");
+      evalTextEl.innerText = "–";
+      bestMoveEl.innerText = "-";
+    }
   }
 
   function renderBoard() {
@@ -509,6 +528,12 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     evalToggleBtn.classList.toggle("active", isEngineOn);
     evalBarEl.style.display = isEngineOn ? "flex" : "none";
     enginePanel.style.display = isEngineOn ? "flex" : "none";
+    if (!isEngineOn) {
+      evalRequestSeq++; // invalidate any in-flight analysis
+      lastEvalFen = null;
+      currentBestMove = null;
+      renderArrows();
+    }
     updateEngineEval();
   });
 

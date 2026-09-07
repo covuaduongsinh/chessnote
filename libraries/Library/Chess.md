@@ -4,6 +4,8 @@ tags: meta/library
 description: "ChessNote - Hệ thống Quản lý Tri thức & Nghiên cứu Cờ Vua Chuyên sâu"
 files:
 - Demo.md
+- arasan.wasm
+- arasanv8-20260906.nnue
 - Templates/Game_Analysis.md
 - Templates/Opening_Repertoire.md
 - Templates/Lesson_Plan.md
@@ -24,13 +26,15 @@ Hệ thống thư viện cờ vua toàn diện cho SilverBullet / ChessNote.
 > trong Library này nữa (đã gỡ bản đóng băng để tránh lệch bản, xem
 > `docs/plans/2026-09-07-danh-gia-va-ke-hoach-hoan-thien-chessnote.md`, mục 1.7 và Giai đoạn 0).
 
-- **Bàn cờ FEN (` ```fen `)**: lật bàn cờ, vẽ mũi tên, tô màu ô. ⚠️ Chưa hỗ trợ click-to-move
-  thật, chưa có phân tích engine thật (hiện chỉ là đánh giá heuristic).
+- **Bàn cờ FEN (` ```fen `)**: click-to-move thật (chess.js), vẽ mũi tên, tô màu ô. Nút
+  "⚡ Engine Eval" gọi engine **Arasan thật** (NNUE, biên dịch WebAssembly) — file
+  `arasan.wasm`/`arasanv8-20260906.nnue` (~26MB) được nạp sẵn trong chính binary ChessNote
+  (xem `plugs/chess/engine/arasan_engine.ts`), không cần cài thêm gì.
 - **Ván đấu PGN (` ```pgn `)**: đồng bộ cây nước đi, phím tắt `Trái/Phải/F`, thanh điểm số
-  **Eval Bar** (heuristic) và **Game Review** tự chấm độ chính xác (heuristic, chưa dùng engine
-  thật).
-- **Bài tập thế cờ chiến thuật (` ```puzzle `)**: hiện thế cờ, gợi ý Hint và hiện đáp án. ⚠️ Chưa
-  tự chấm đúng/sai khi người dùng thử nước đi.
+  **Eval Bar** và **Game Review** tự chấm độ chính xác — ⚠️ hiện vẫn dùng heuristic (chưa nối
+  engine Arasan thật cho luồng phân tích hàng loạt nước đi này).
+- **Bài tập thế cờ chiến thuật (` ```puzzle `)**: hiện thế cờ, gợi ý Hint, tự chấm đúng/sai
+  bằng chess.js khi người dùng thử nước đi.
 
 ## 2. Các mẫu giáo án & sổ tay (Templates)
 - [[Library/Chess/Templates/Game_Analysis|Mẫu Phân Tích Ván Đấu]]
