@@ -153,68 +153,90 @@ async function copyAssets(dist: string) {
     await writeFile(`${dist}/${output}`, compiled.css, "utf-8");
   }
 
-  // Generate manifest.json
-  const manifest = {
-    name: "ChessNote",
-    short_name: "ChessNote",
-    description: "ChessNote - Chess Knowledge & Study Base",
-    start_url: "./",
-    display: "standalone",
-    background_color: "#1e293b",
-    theme_color: "#1e293b",
-    icons: [
-      {
-        src: "favicon-96x96.png",
-        type: "image/png",
-        sizes: "96x96",
-      },
-      {
-        src: "logo.png",
-        type: "image/png",
-        sizes: "512x512",
-      },
-      {
-        src: "apple-touch-icon.png",
-        type: "image/png",
-        sizes: "180x180",
-      },
-    ],
-  };
-  await writeFile(
-    `${dist}/manifest.json`,
-    JSON.stringify(manifest, null, 2),
-    "utf-8",
-  );
+  // Everything below this point bakes STATIC, offline-only assets
+  // (manifest.json, .config, base_fs.json, and a template-variable-free
+  // index.html) into the *same* `.client/` directory the Rust server reads
+  // and Jinja-templates per request (see server/src/handlers/bundle.rs,
+  // `template_index_html`). That's fine for the standalone Capacitor mobile
+  // bundle (which has no server and needs everything pre-resolved), but
+  // doing it unconditionally silently overwrote the real server's
+  // `.client/index.html` — replacing `{{ host_prefix }}`/`.client/`-prefixed
+  // asset paths with hardcoded/stripped ones — which breaks the normal
+  // self-hosted web app: the browser requests bare `/client.js` (which
+  // doesn't exist as a route) instead of `/.client/client.js`, so the whole
+  // client silently fails to boot (blank page, zero console output, since
+  // Chrome refuses to execute a `<script type="module">` whose response
+  // Content-Type isn't a JS type — here it's the SPA-fallback HTML).
+  // See docs/plans/2026-09-07-danh-gia-va-ke-hoach-hoan-thien-chessnote.md.
+  // Gate it behind an explicit `--mobile` CLI flag so `npm run build`
+  // (server, desktop) keeps the real templated shell, and only
+  // `npm run mobile:build` (which passes the flag) gets the baked
+  // standalone one. A flag (not an env var) so the same npm script works
+  // identically whether npm's script-shell is cmd.exe, PowerShell, or bash.
+  const isMobileBuild = process.argv.includes("--mobile");
+  if (isMobileBuild) {
+    // Generate manifest.json
+    const manifest = {
+      name: "ChessNote",
+      short_name: "ChessNote",
+      description: "ChessNote - Chess Knowledge & Study Base",
+      start_url: "./",
+      display: "standalone",
+      background_color: "#1e293b",
+      theme_color: "#1e293b",
+      icons: [
+        {
+          src: "favicon-96x96.png",
+          type: "image/png",
+          sizes: "96x96",
+        },
+        {
+          src: "logo.png",
+          type: "image/png",
+          sizes: "512x512",
+        },
+        {
+          src: "apple-touch-icon.png",
+          type: "image/png",
+          sizes: "180x180",
+        },
+      ],
+    };
+    await writeFile(
+      `${dist}/manifest.json`,
+      JSON.stringify(manifest, null, 2),
+      "utf-8",
+    );
 
-  // Generate default .config for offline/standalone mode
-  const defaultBootConfig = {
-    spaceFolderPath: "ChessNote",
-    indexPage: "INDEX",
-    readOnly: false,
-    enableClientEncryption: false,
-    spacePrefixes: [],
-  };
-  await writeFile(
-    `${dist}/.config`,
-    JSON.stringify(defaultBootConfig, null, 2),
-    "utf-8",
-  );
+    // Generate default .config for offline/standalone mode
+    const defaultBootConfig = {
+      spaceFolderPath: "ChessNote",
+      indexPage: "INDEX",
+      readOnly: false,
+      enableClientEncryption: false,
+      spacePrefixes: [],
+    };
+    await writeFile(
+      `${dist}/.config`,
+      JSON.stringify(defaultBootConfig, null, 2),
+      "utf-8",
+    );
 
-  // Copy standard libraries base_fs to .fs for offline access
-  try {
-    await cp("client_bundle/base_fs", `${dist}/.fs`, { recursive: true });
-  } catch (e) {
-    console.warn("Could not copy base_fs to .fs:", e);
-  }
+    // Copy standard libraries base_fs to .fs for offline access
+    try {
+      await cp("client_bundle/base_fs", `${dist}/.fs`, { recursive: true });
+    } catch (e) {
+      console.warn("Could not copy base_fs to .fs:", e);
+    }
 
-  // Create base_fs.json bundle containing all plugs and initial space template
-  try {
-    const baseBundle = await bundleAssets("client_bundle/base_fs", ["**/*"]);
-    if (!baseBundle.has("INDEX.md")) {
-      baseBundle.writeTextFileSync(
-        "INDEX.md",
-        "text/markdown",
-        `# ♟️ Chào mừng đến với ChessNote
+    // Create base_fs.json bundle containing all plugs and initial space template
+    try {
+      const baseBundle = await bundleAssets("client_bundle/base_fs", ["**/*"]);
+      if (!baseBundle.has("INDEX.md")) {
+        baseBundle.writeTextFileSync(
+          "INDEX.md",
+          "text/markdown",
+          `# ♟️ Chào mừng đến với ChessNote
 
 Chào mừng bạn đến với **ChessNote** - Hệ thống ghi chú và nghiên cứu tri thức cờ vua chuyên sâu.
 
@@ -237,40 +259,41 @@ r1bqkb1r/pppp1ppp/2n5/4p3/2B1n3/5N2/PPPP1PPP/RNBQK2R w KQkq - 0 4
 
 ## 🧩 Bài tập Chiến thuật (Puzzle)
 \`\`\`puzzle
-fen: r1bqk2r/pp2bppp/2n1p3/2ppP3/3P4/2PB1N2/P1P2PPP/R1BQK2R w KQkq - 0 8
+fen: 5rk1/5ppp/8/8/8/3B1N2/8/3QKR2 w - - 0 1
 turn: white
 solution: Bxh7+ Kxh7 Ng5+ Kg8 Qh5
 hint: Đòn thí Tượng kinh điển phá thành (Greek Gift Sacrifice)
 themes: Sacrifice, Attacking King
 \`\`\`
 `,
+        );
+      }
+      await writeFile(
+        `${dist}/base_fs.json`,
+        JSON.stringify(baseBundle.toJSON(), null, 2),
+        "utf-8",
       );
+    } catch (e) {
+      console.warn("Could not create base_fs.json:", e);
     }
-    await writeFile(
-      `${dist}/base_fs.json`,
-      JSON.stringify(baseBundle.toJSON(), null, 2),
-      "utf-8",
-    );
-  } catch (e) {
-    console.warn("Could not create base_fs.json:", e);
-  }
 
-  // Generate static standalone index.html (with template variables cleaned)
-  let indexHtml = await readFile("client/html/index.html", "utf-8");
-  indexHtml = indexHtml.replaceAll(
-    '<base href="{{ host_prefix | safe }}/" />',
-    '<base href="./" />',
-  );
-  indexHtml = indexHtml.replaceAll("{{ host_prefix | safe }}", "");
-  indexHtml = indexHtml.replaceAll("{{ title }}", "ChessNote");
-  indexHtml = indexHtml.replaceAll(
-    "{{ description }}",
-    "ChessNote - Chess Knowledge & Study Base",
-  );
-  indexHtml = indexHtml.replaceAll("{{ additional_head_html | safe }}", "");
-  indexHtml = indexHtml.replaceAll("{{ content | safe }}", "");
-  indexHtml = indexHtml.replaceAll(".client/", "");
-  await writeFile(`${dist}/index.html`, indexHtml, "utf-8");
+    // Generate static standalone index.html (with template variables cleaned)
+    let indexHtml = await readFile("client/html/index.html", "utf-8");
+    indexHtml = indexHtml.replaceAll(
+      '<base href="{{ host_prefix | safe }}/" />',
+      '<base href="./" />',
+    );
+    indexHtml = indexHtml.replaceAll("{{ host_prefix | safe }}", "");
+    indexHtml = indexHtml.replaceAll("{{ title }}", "ChessNote");
+    indexHtml = indexHtml.replaceAll(
+      "{{ description }}",
+      "ChessNote - Chess Knowledge & Study Base",
+    );
+    indexHtml = indexHtml.replaceAll("{{ additional_head_html | safe }}", "");
+    indexHtml = indexHtml.replaceAll("{{ content | safe }}", "");
+    indexHtml = indexHtml.replaceAll(".client/", "");
+    await writeFile(`${dist}/index.html`, indexHtml, "utf-8");
+  }
 
   // HACK: Patch the JS by removing an invalid regex
   let bundleJs = await readFile(`${dist}/client.js`, "utf-8");

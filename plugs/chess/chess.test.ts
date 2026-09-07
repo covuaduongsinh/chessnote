@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { fenWidget, pgnWidget, puzzleWidget } from "./chess.ts";
+import { applyMove, applySan, fenWidget, legalMoves, pgnWidget, puzzleWidget } from "./chess.ts";
 
 describe("Chess Plug Unit Tests", () => {
   test("fenWidget generates valid HTML and SVG board for starting position", async () => {
@@ -56,5 +56,113 @@ rating: 1650`;
     expect(result.html).toContain("Greek Gift Sacrifice");
     expect(result.script).toContain("Bxh7+");
     expect(result.script).toContain("Qh5");
+  });
+
+  // --- Real move-generation/validation behavior (the click-to-move engine
+  // room, exposed as syscalls for the widget iframes — see chess.plug.yaml).
+  // Unlike the tests above, these check actual chess.js-backed behavior, not
+  // just that some substring appears in generated HTML/script.
+
+  test("legalMoves returns real legal destinations for a piece, respecting check/pins", async () => {
+    const start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    const moves = legalMoves(start, "e2");
+    expect(moves.map((m) => m.to).sort()).toEqual(["e3", "e4"]);
+
+    // A pinned piece has no legal moves that expose the king: black queen on
+    // e7 pins the white knight on e2 to the white king on e1 along the
+    // e-file — a knight can never move along its own pin line, so it has no
+    // legal moves at all here.
+    const pinned = "k7/4q3/8/8/8/8/4N3/4K3 w - - 0 1";
+    expect(legalMoves(pinned, "e2")).toEqual([]);
+  });
+
+  test("legalMoves flags promotion moves", async () => {
+    const fen = "k7/4P3/8/8/8/8/8/4K3 w - - 0 1";
+    const moves = legalMoves(fen, "e7");
+    expect(moves.length).toBeGreaterThan(0);
+    expect(moves.every((m) => m.promotion)).toBe(true);
+  });
+
+  test("legalMoves returns [] for an empty square or invalid FEN", async () => {
+    const start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    expect(legalMoves(start, "e4")).toEqual([]);
+    expect(legalMoves("not a fen", "e2")).toEqual([]);
+  });
+
+  test("applyMove plays a real legal move and reports the resulting position", async () => {
+    const start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    const result = applyMove(start, "e2", "e4") as any;
+    expect(result.error).toBeUndefined();
+    expect(result.san).toBe("e4");
+    expect(result.fen).toContain("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b");
+    expect(result.turn).toBe("b");
+  });
+
+  test("applyMove rejects an illegal move instead of silently doing nothing", async () => {
+    const start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    const result = applyMove(start, "e2", "e5") as any;
+    expect(result.error).toBeDefined();
+    expect(result.fen).toBeUndefined();
+  });
+
+  test("applySan chain detects checkmate (fool's mate: 1.f3 e5 2.g4 Qh4#)", async () => {
+    const start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    let r = applySan(start, "f3") as any;
+    expect(r.error).toBeUndefined();
+    r = applySan(r.fen, "e5") as any;
+    expect(r.error).toBeUndefined();
+    r = applySan(r.fen, "g4") as any;
+    expect(r.error).toBeUndefined();
+    r = applySan(r.fen, "Qh4") as any;
+    expect(r.error).toBeUndefined();
+    expect(r.isCheckmate).toBe(true);
+    expect(r.isGameOver).toBe(true);
+  });
+
+  test("applySan rejects a SAN move that doesn't match any legal move", async () => {
+    const start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    const result = applySan(start, "Qh5") as any;
+    expect(result.error).toBeDefined();
+  });
+
+  // --- Honest error states instead of silently substituting/discarding bad
+  // input (Giai đoạn 0/1: "đừng nuốt lỗi im lặng").
+
+  test("fenWidget returns a visible error state for invalid FEN instead of silently falling back", async () => {
+    const result: any = await fenWidget("not-a-real-fen", "TestPage");
+    expect(result.script).toBeUndefined();
+    expect(result.html).toContain("FEN không hợp lệ");
+  });
+
+  test("pgnWidget returns a visible error state for invalid PGN instead of silently resetting", async () => {
+    const result: any = await pgnWidget("this is not a pgn {{{", "TestPage");
+    expect(result.script).toBeUndefined();
+    expect(result.html).toContain("PGN không hợp lệ");
+  });
+
+  test("puzzleWidget requires a solution to be gradable", async () => {
+    const result: any = await puzzleWidget(
+      "fen: rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\nturn: white",
+      "TestPage",
+    );
+    expect(result.script).toBeUndefined();
+    expect(result.html).toContain("thiếu đáp án");
+  });
+
+  // Regression test: the shipped demo puzzle (libraries/Library/Chess/Demo.md,
+  // and the default INDEX.md content in build/build_client.ts) once had a FEN
+  // whose king hadn't castled combined with a solution ("Kxh7") that's only
+  // legal after castling — an illegal move a real solver would immediately
+  // discover and be stuck on. Guard against that class of bug: any puzzle's
+  // solution must be a fully legal move sequence against its own FEN.
+  test("demo puzzle's solution is a fully legal move sequence against its FEN (chess.js-verified)", async () => {
+    const fen = "5rk1/5ppp/8/8/8/3B1N2/8/3QKR2 w - - 0 1";
+    const solution = ["Bxh7+", "Kxh7", "Ng5+", "Kg8", "Qh5"];
+    let currentFen = fen;
+    for (const san of solution) {
+      const result = applySan(currentFen, san) as any;
+      expect(result.error, `move "${san}" from ${currentFen}`).toBeUndefined();
+      currentFen = result.fen;
+    }
   });
 });

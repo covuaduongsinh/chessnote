@@ -12,3 +12,35 @@ functions:
     path: ./chess.ts:puzzleWidget
     codeWidget: puzzle
     renderMode: iframe
+  chessLegalMoves:
+    path: ./chess.ts:legalMoves
+    syscall:
+      name: chess.legalMoves
+      description: Legal destination squares for the piece on a given square in a FEN position.
+      parameters:
+        - { name: fen, type: string }
+        - { name: square, type: string }
+      returns:
+        - { type: array }
+  chessApplyMove:
+    path: ./chess.ts:applyMove
+    syscall:
+      name: chess.applyMove
+      description: Applies a from/to (+ optional promotion) move to a FEN position using chess.js.
+      parameters:
+        - { name: fen, type: string }
+        - { name: from, type: string }
+        - { name: to, type: string }
+        - { name: promotion, type: string }
+      returns:
+        - { type: object }
+  chessApplySan:
+    path: ./chess.ts:applySan
+    syscall:
+      name: chess.applySan
+      description: Applies a move given in SAN notation to a FEN position using chess.js.
+      parameters:
+        - { name: fen, type: string }
+        - { name: san, type: string }
+      returns:
+        - { type: object }

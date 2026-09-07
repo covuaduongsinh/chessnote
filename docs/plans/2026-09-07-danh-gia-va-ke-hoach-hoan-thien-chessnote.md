@@ -309,6 +309,80 @@ trong code, tuyệt đối không viết stub trông như đã hoàn chỉnh.
 
 ---
 
+## 3b. NHẬT KÝ TRIỂN KHAI — Giai đoạn 0 & 1 (đã hoàn thành, kiểm chứng qua trình duyệt thật)
+
+> Cập nhật 2026-09-07, sau khi triển khai. Ghi lại đúng tinh thần mục 4.2 dưới đây: không tự
+> nhận "xong" khi chỉ build/test đơn vị xanh — mọi mục dưới đây đã được bấm nút/click thật
+> trên trình duyệt (qua Chrome DevTools Protocol), không chỉ chạy `vitest`.
+
+**Giai đoạn 0** (commit `183b84f0`): đã vá đủ 6 mục (test Android sai package, `.gitignore`
+desktop build cache, đổi nhãn "Arasan Engine"/"Grandmaster AI" thành nhãn trung thực, sửa tài
+liệu claim sai, xoá bundle `Chess.plug.js` trùng lặp, khôi phục pin `preact`).
+
+**Giai đoạn 1** (click-to-move + chấm điểm puzzle thật): đã implement 3 syscall mới
+(`chess.legalMoves`, `chess.applyMove`, `chess.applySan` trong `plugs/chess/chess.ts`, đăng ký
+qua `chess.plug.yaml`) để widget chạy trong iframe cô lập gọi ngược vào plug worker (nơi
+`chess.js` sẵn có) qua cầu `syscall()` có sẵn của SilverBullet — không cần nhúng `chess.js`
+vào iframe hay gọi CDN. `fenWidget` và `puzzleWidget` giờ có click-to-move thật (tô sáng nước
+hợp lệ, có ô chọn phong cấp), `puzzleWidget` chấm đúng/sai thật bằng cách so khớp SAN sinh ra
+từ chess.js với đáp án, tự động phát nước đối phương. Đã thêm 10 test hành vi thật (không chỉ
+so khớp chuỗi HTML) vào `chess.test.ts`, cùng test lỗi rõ ràng thay cho nuốt lỗi im lặng.
+
+**Kiểm chứng qua trình duyệt thật (không chỉ unit test)**: build release, mở server thật, dùng
+`javascript_tool` bấm trực tiếp vào từng ô trên bàn cờ trong iframe, xác nhận: (1) chọn quân
+tô sáng đúng các ô đi được, (2) đi `e2-e4` cập nhật đúng FEN + vẽ lại quân, (3) giải trọn vẹn
+puzzle Greek Gift 5 nước (`Bxh7+ Kxh7 Ng5+ Kg8 Qh5`) với đối phương tự động phản hồi 2 lần,
+banner đổi "🎉 Chính xác!", (4) đi nước hợp lệ nhưng sai đáp án bị từ chối, không commit vào
+bàn cờ, banner đổi "❌ Chưa đúng". Ảnh chụp màn hình cho từng bước đã xác nhận trực quan.
+
+### ⚠️ 2 lỗi nghiêm trọng MỚI phát hiện trong lúc kiểm chứng (không nằm trong audit tĩnh ban đầu)
+
+Cả hai lỗi này **không** thể phát hiện bằng đọc code hay chạy `vitest` — chỉ lộ ra khi thực sự
+mở trình duyệt và bấm thử, đúng bài học mà audit ban đầu đã cảnh báo ("build xanh ≠ tính năng
+chạy được").
+
+**1. `index.html` bị ghi đè, làm hỏng TOÀN BỘ web/server (không chỉ chess)**
+
+- **Triệu chứng**: mở app qua server (`silverbullet.exe -p <port> <space>`) → trang trắng hoàn
+  toàn, không một dòng console log nào (kể cả log boot "Booting SilverBullet client").
+- **Nguyên nhân gốc**: khối code mới trong `build/build_client.ts` (thêm bởi commit
+  `00183eaa` để đóng gói bản offline cho Capacitor mobile) ghi đè trực tiếp lên
+  `client_bundle/client/.client/index.html` — **đúng file mà server Rust dùng để template
+  động** (`server/src/handlers/bundle.rs`, `template_index_html`) — bằng một bản **tĩnh, đã
+  strip `.client/` khỏi mọi đường dẫn asset** để phù hợp với Capacitor (không có HTTP server).
+  Kết quả: trình duyệt gọi `/client.js` (không tồn tại route này) thay vì `/.client/client.js`
+  → `<script type="module">` bị Chrome từ chối thực thi vì Content-Type trả về là
+  `text/html` (trang SPA-fallback) thay vì JavaScript — toàn bộ client im lặng không chạy gì.
+- **Đã sửa**: gate toàn bộ khối "bake static assets cho mobile" (manifest.json, `.config`,
+  copy `base_fs`, `base_fs.json`, static `index.html`) sau flag CLI `--mobile`
+  (`build/build_client.ts`), thêm script `build:client:mobile`/`build:mobile`, đổi
+  `mobile:build` sang gọi `build:mobile`. `npm run build` (server/desktop) giờ giữ đúng
+  `.client/index.html` templated; chỉ `npm run mobile:build` mới bake bản tĩnh.
+- **Ảnh hưởng nếu chưa sửa**: **mọi người dùng self-host bình thường** (không phải mobile) sẽ
+  thấy trang trắng hoàn toàn kể từ commit `00183eaa` — đây là regression nghiêm trọng nhất
+  từng phát hiện trong toàn bộ đợt audit, ảnh hưởng ra ngoài phạm vi chess.
+
+**2. Dữ liệu puzzle mẫu có sẵn trong repo bị sai luật cờ**
+
+- **Triệu chứng**: giải puzzle demo (`Bxh7+ Kxh7 Ng5+ Kg8 Qh5`), sau nước đầu đúng, đối phương
+  **không bao giờ tự đi tiếp** — kẹt vĩnh viễn ở trạng thái "Đối phương đang đi tiếp...".
+- **Nguyên nhân gốc**: FEN mẫu (`libraries/Library/Chess/Demo.md` **và** INDEX.md mặc định
+  hardcode trong `build/build_client.ts`) đặt vua đen ở `e8` (chưa nhập thành), nhưng chuỗi
+  đáp án giả định vua đã nhập thành ở `g8` (`Kxh7` chỉ hợp lệ khi vua kề `h7`) — **`Kxh7` là
+  nước đi bất hợp pháp** trên chính vị trí FEN đề ra. Đây là lỗi dữ liệu có sẵn trong repo, có
+  từ commit `00183eaa`, không phải lỗi phát sinh từ Giai đoạn 1.
+- **Đã sửa**: thay bằng FEN `5rk1/5ppp/8/8/8/3B1N2/8/3QKR2 w - - 0 1` (vua đen đã nhập thành ở
+  g8) — **đã kiểm chứng cả 5 nước hợp lệ 100% bằng chính chess.js** trước khi đưa vào (chạy
+  script Node độc lập, xem lịch sử thao tác), cập nhật ở cả `Demo.md` và `build_client.ts`.
+  Thêm test hồi quy `chess.test.ts`: "demo puzzle's solution is a fully legal move sequence
+  against its FEN" để lỗi tương tự không lọt qua lần nữa.
+- **Điểm tích cực đáng ghi nhận**: đây chính là bằng chứng logic chấm điểm puzzle của Giai
+  đoạn 1 **hoạt động đúng như thiết kế** — khi solution data sai, hệ thống gọi `showError()`
+  báo lỗi rõ ràng thay vì âm thầm treo hoặc giả vờ đúng (đúng nguyên tắc "không nuốt lỗi im
+  lặng" đặt ra từ Giai đoạn 0).
+
+---
+
 ## 4. RỦI RO & LƯU Ý VẬN HÀNH
 
 1. **Hai phiên Claude Code chạy song song trên cùng repo** — đây là nguyên nhân của toàn bộ tình

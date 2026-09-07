@@ -1,7 +1,6 @@
 import { Chess } from "chess.js";
 import { CHESS_CSS, PIECE_SVGS } from "./board_renderer.ts";
 import { reviewGame } from "./engine/game_reviewer.ts";
-import { centipawnsToWinChance, formatScore } from "./engine/uci_protocol.ts";
 
 function escapeHtml(str: string): string {
   return str
@@ -10,6 +9,96 @@ function escapeHtml(str: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+/** Compact error state shown instead of a board when input can't be parsed. */
+function errorWidgetHtml(title: string, message: string): string {
+  return `
+<style>${CHESS_CSS}</style>
+<div class="chessnote-container">
+  <div class="chess-header">
+    <div class="chess-title">⚠️ ${escapeHtml(title)}</div>
+  </div>
+  <div style="padding: 8px 4px; color: var(--text-muted, #94a3b8);">${escapeHtml(message)}</div>
+</div>`;
+}
+
+/**
+ * Legal destination squares for the piece on `square`, using real chess.js
+ * rules (checks, pins, castling, en passant all handled by chess.js itself).
+ * Exposed as a syscall (see chess.plug.yaml) so the interactive board running
+ * inside the sandboxed widget iframe — which has no access to this module's
+ * imports — can call back into this plug worker (where chess.js *is*
+ * available) via the iframe's built-in `syscall()` bridge instead of
+ * reimplementing chess rules in inline iframe JS.
+ */
+export function legalMoves(
+  fen: string,
+  square: string,
+): { to: string; san: string; promotion: boolean }[] {
+  try {
+    const chess = new Chess(fen);
+    const moves = chess.moves({ square: square as any, verbose: true });
+    return moves.map((m) => ({ to: m.to, san: m.san, promotion: !!m.promotion }));
+  } catch (_e) {
+    return [];
+  }
+}
+
+export interface ChessMoveResult {
+  fen: string;
+  san: string;
+  captured?: string;
+  turn: "w" | "b";
+  inCheck: boolean;
+  isCheckmate: boolean;
+  isStalemate: boolean;
+  isDraw: boolean;
+  isGameOver: boolean;
+}
+
+function describeResult(chess: Chess, san: string, captured?: string): ChessMoveResult {
+  return {
+    fen: chess.fen(),
+    san,
+    captured,
+    turn: chess.turn(),
+    inCheck: chess.inCheck(),
+    isCheckmate: chess.isCheckmate(),
+    isStalemate: chess.isStalemate(),
+    isDraw: chess.isDraw(),
+    isGameOver: chess.isGameOver(),
+  };
+}
+
+/** Applies a from/to (+ optional promotion) move to `fen` using chess.js. */
+export function applyMove(
+  fen: string,
+  from: string,
+  to: string,
+  promotion?: string,
+): ChessMoveResult | { error: string } {
+  try {
+    const chess = new Chess(fen);
+    const move = chess.move({ from, to, promotion: promotion || undefined });
+    return describeResult(chess, move.san, move.captured);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "illegal move" };
+  }
+}
+
+/** Applies a move given in SAN notation to `fen` using chess.js. */
+export function applySan(
+  fen: string,
+  san: string,
+): ChessMoveResult | { error: string } {
+  try {
+    const chess = new Chess(fen);
+    const move = chess.move(san);
+    return describeResult(chess, move.san, move.captured);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "illegal move" };
+  }
 }
 
 /**
@@ -51,10 +140,13 @@ export async function fenWidget(bodyText: string, _pageName: string) {
 
   try {
     new Chess(fen);
-  } catch (_e) {
-    if (!fen || fen.split(" ").length < 4) {
-      fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-    }
+  } catch (e) {
+    return {
+      html: errorWidgetHtml(
+        "FEN không hợp lệ",
+        `Không thể đọc chuỗi FEN: "${fen}". ${e instanceof Error ? e.message : ""}`.trim(),
+      ),
+    };
   }
 
   const widgetId = `chess_fen_${Math.random().toString(36).substring(2, 9)}`;
@@ -74,10 +166,11 @@ export async function fenWidget(bodyText: string, _pageName: string) {
       </div>
       <div class="chessnote-board-wrapper">
         <div class="chess-board" id="${widgetId}_board"></div>
-        <svg class="chess-arrows-layer" id="${widgetId}_arrows"></svg>
+        <svg class="chess-arrows-layer" id="${widgetId}_arrows" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
       </div>
     </div>
     <div class="chessnote-panel">
+      <div class="chess-error-banner" id="${widgetId}_error" style="display: none;"></div>
       <div class="chess-controls">
         <button class="chess-btn btn-engine" id="${widgetId}_eval_toggle">⚡ Engine Eval</button>
         <button class="chess-btn" id="${widgetId}_flip">🔄 Flip</button>
@@ -112,13 +205,15 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   const highlights = ${JSON.stringify(highlights)};
   
   let selectedSquare = null;
-  let legalMoves = [];
+  let legalMoves = []; // [{to, san, promotion}] for the currently selected square
   let isEngineOn = false;
   let currentBestMove = null;
+  let isBusy = false; // true while a move syscall round-trip is in flight
 
   const boardEl = document.getElementById("${widgetId}_board");
   const arrowsEl = document.getElementById("${widgetId}_arrows");
   const fenTextEl = document.getElementById("${widgetId}_fen_text");
+  const errorEl = document.getElementById("${widgetId}_error");
   const flipBtn = document.getElementById("${widgetId}_flip");
   const resetBtn = document.getElementById("${widgetId}_reset");
   const copyFenBtn = document.getElementById("${widgetId}_copy_fen");
@@ -130,6 +225,44 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   const enginePanel = document.getElementById("${widgetId}_engine_panel");
   const engineScoreEl = document.getElementById("${widgetId}_engine_score");
   const bestMoveEl = document.getElementById("${widgetId}_best_move");
+
+  function showError(msg) {
+    if (!msg) {
+      errorEl.style.display = "none";
+      return;
+    }
+    errorEl.textContent = "⚠️ " + msg;
+    errorEl.style.display = "block";
+  }
+
+  function gameOverMessage(result) {
+    if (result.isCheckmate) return "Chiếu hết! " + (result.turn === "w" ? "Đen" : "Trắng") + " thắng.";
+    if (result.isStalemate) return "Hết nước đi hợp lệ (Stalemate) — hòa.";
+    if (result.isDraw) return "Ván đấu hòa.";
+    return null;
+  }
+
+  // Small Q/R/B/N picker shown over the board when a pawn move needs a
+  // promotion piece chosen before we know which move to send to chess.js.
+  // \`moverColor\` is "w"/"b" for the side actually making the move (the
+  // active color in the FEN *before* the move) — not the board orientation,
+  // which is just which way the board is visually flipped.
+  function askPromotion(moverColor) {
+    return new Promise((resolve) => {
+      const picker = document.createElement("div");
+      picker.className = "promotion-picker";
+      ["q", "r", "b", "n"].forEach((p) => {
+        const btn = document.createElement("button");
+        btn.innerHTML = PIECE_SVGS[moverColor + p.toUpperCase()] || p;
+        btn.addEventListener("click", () => {
+          picker.remove();
+          resolve(p);
+        });
+        picker.appendChild(btn);
+      });
+      boardEl.parentElement.appendChild(picker);
+    });
+  }
 
   function parseFenBoard(f) {
     const parts = f.split(" ");
@@ -184,6 +317,8 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     const boardState = parseFenBoard(currentFen);
     const files = orientation === "white" ? ["a","b","c","d","e","f","g","h"] : ["h","g","f","e","d","c","b","a"];
     const ranks = orientation === "white" ? [8,7,6,5,4,3,2,1] : [1,2,3,4,5,6,7,8];
+    const destSquares = {};
+    legalMoves.forEach((m) => { destSquares[m.to] = m; });
 
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
@@ -201,6 +336,10 @@ export async function fenWidget(bodyText: string, _pageName: string) {
         }
         if (highlights[sq]) {
           sqDiv.classList.add("highlight");
+        }
+        if (destSquares[sq]) {
+          sqDiv.classList.add("dest");
+          if (boardState[sq]) sqDiv.classList.add("has-piece");
         }
 
         if (boardState[sq]) {
@@ -253,7 +392,11 @@ export async function fenWidget(bodyText: string, _pageName: string) {
 
       if (fromC === -1 || fromR === -1 || toC === -1 || toR === -1) return;
 
-      const sqSize = 360 / 8;
+      // The <svg> has viewBox="0 0 100 100" (see the html template above) so
+      // these coordinates are percentages of the board — scale-invariant
+      // regardless of how large the board is actually rendered (fixes
+      // arrows drifting off-square on the narrower mobile board width).
+      const sqSize = 100 / 8;
       const x1 = fromC * sqSize + sqSize / 2;
       const y1 = fromR * sqSize + sqSize / 2;
       const x2 = toC * sqSize + sqSize / 2;
@@ -266,8 +409,8 @@ export async function fenWidget(bodyText: string, _pageName: string) {
       marker.setAttribute("viewBox", "0 0 10 10");
       marker.setAttribute("refX", "5");
       marker.setAttribute("refY", "5");
-      marker.setAttribute("markerWidth", "6");
-      marker.setAttribute("markerHeight", "6");
+      marker.setAttribute("markerWidth", "2.2");
+      marker.setAttribute("markerHeight", "2.2");
       marker.setAttribute("orient", "auto-start-reverse");
 
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -283,23 +426,80 @@ export async function fenWidget(bodyText: string, _pageName: string) {
       line.setAttribute("x2", x2);
       line.setAttribute("y2", y2);
       line.setAttribute("stroke", strokeColor);
-      line.setAttribute("stroke-width", "4");
+      line.setAttribute("stroke-width", "1.2");
       line.setAttribute("stroke-opacity", "0.85");
       line.setAttribute("marker-end", "url(#" + markerId + ")");
       arrowsEl.appendChild(line);
     });
   }
 
-  function handleSquareClick(sq, boardState) {
+  async function handleSquareClick(sq, boardState) {
+    if (isBusy) return;
+
+    // Clicking a highlighted legal destination while a piece is selected:
+    // attempt the move for real via chess.js (through the syscall bridge).
+    const attemptedMove = selectedSquare
+      ? legalMoves.find((m) => m.to === sq)
+      : null;
+    if (selectedSquare && attemptedMove) {
+      const from = selectedSquare;
+      isBusy = true;
+      selectedSquare = null;
+      legalMoves = [];
+      try {
+        let promotion = undefined;
+        if (attemptedMove.promotion) {
+          const moverColor = currentFen.split(" ")[1] === "w" ? "w" : "b";
+          promotion = await askPromotion(moverColor);
+        }
+        const result = await syscall("chess.applyMove", currentFen, from, sq, promotion);
+        if (result && result.error) {
+          showError("Nước đi không hợp lệ: " + result.error);
+          renderBoard();
+          return;
+        }
+        showError(null);
+        currentFen = result.fen;
+        fenTextEl.innerText = currentFen;
+        const overMsg = gameOverMessage(result);
+        if (overMsg) showError(overMsg);
+        renderBoard();
+      } finally {
+        isBusy = false;
+      }
+      return;
+    }
+
     if (selectedSquare === sq) {
       selectedSquare = null;
+      legalMoves = [];
       renderBoard();
       return;
     }
-    if (boardState[sq]) {
-      selectedSquare = sq;
-    } else {
+
+    if (!boardState[sq]) {
       selectedSquare = null;
+      legalMoves = [];
+      renderBoard();
+      return;
+    }
+
+    // Only allow selecting a piece belonging to the side to move (FEN's
+    // active-color field), so you can't "select" the opponent's pieces.
+    const activeColor = currentFen.split(" ")[1] === "w" ? "w" : "b";
+    if (boardState[sq][0] !== activeColor) {
+      selectedSquare = null;
+      legalMoves = [];
+      renderBoard();
+      return;
+    }
+
+    selectedSquare = sq;
+    isBusy = true;
+    try {
+      legalMoves = await syscall("chess.legalMoves", currentFen, sq) || [];
+    } finally {
+      isBusy = false;
     }
     renderBoard();
   }
@@ -320,6 +520,8 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   resetBtn.addEventListener("click", () => {
     currentFen = initialFen;
     selectedSquare = null;
+    legalMoves = [];
+    showError(null);
     fenTextEl.innerText = currentFen;
     renderBoard();
   });
@@ -348,12 +550,20 @@ export async function fenWidget(bodyText: string, _pageName: string) {
  * in yet, this is not Arasan/Stockfish analysis.
  */
 export async function pgnWidget(bodyText: string, _pageName: string) {
+  const trimmedPgn = bodyText.trim();
   let chess: Chess;
   try {
     chess = new Chess();
-    chess.loadPgn(bodyText.trim());
-  } catch (_e) {
-    chess = new Chess();
+    if (trimmedPgn) {
+      chess.loadPgn(trimmedPgn);
+    }
+  } catch (e) {
+    return {
+      html: errorWidgetHtml(
+        "PGN không hợp lệ",
+        `Không thể đọc biên bản ván đấu này. ${e instanceof Error ? e.message : ""}`.trim(),
+      ),
+    };
   }
 
   const header = chess.header();
@@ -385,7 +595,7 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
       </div>
       <div class="chessnote-board-wrapper">
         <div class="chess-board" id="${widgetId}_board"></div>
-        <svg class="chess-arrows-layer" id="${widgetId}_arrows"></svg>
+        <svg class="chess-arrows-layer" id="${widgetId}_arrows" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
       </div>
     </div>
     <div class="chessnote-panel">
@@ -512,6 +722,7 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
 
         const sqDiv = document.createElement("div");
         sqDiv.className = "chess-sq " + (isLight ? "light" : "dark");
+        sqDiv.dataset.sq = sq;
 
         if (boardState[sq]) {
           const piece = boardState[sq];
@@ -676,6 +887,25 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
     }
   }
 
+  try {
+    new Chess(fen);
+  } catch (e) {
+    return {
+      html: errorWidgetHtml(
+        "FEN của bài tập không hợp lệ",
+        `Không thể đọc chuỗi FEN: "${fen}". ${e instanceof Error ? e.message : ""}`.trim(),
+      ),
+    };
+  }
+  if (!solutionStr) {
+    return {
+      html: errorWidgetHtml(
+        "Bài tập thiếu đáp án",
+        'Cần khai báo dòng "solution: ..." (các nước đi SAN cách nhau bằng dấu cách) để có thể chấm đúng/sai.',
+      ),
+    };
+  }
+
   const solutionMoves = solutionStr.split(" ").map((s) => s.trim()).filter(Boolean);
   const widgetId = `chess_puzzle_${Math.random().toString(36).substring(2, 9)}`;
 
@@ -691,6 +921,7 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
       <div class="chess-board" id="${widgetId}_board"></div>
     </div>
     <div class="chessnote-panel">
+      <div class="chess-error-banner" id="${widgetId}_error" style="display: none;"></div>
       <div class="puzzle-banner pending" id="${widgetId}_status">
         <span>🤔 ${turn === "white" ? "White" : "Black"} to move and win!</span>
       </div>
@@ -716,18 +947,35 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
   const startFen = ${JSON.stringify(fen)};
   const solutionMoves = ${JSON.stringify(solutionMoves)};
   const orientation = ${JSON.stringify(turn)};
-  
+
   let currentFen = startFen;
-  let currentStep = 0;
+  let currentStep = 0; // index into solutionMoves the solver must play next
   let selectedSquare = null;
+  let legalMoves = [];
+  let solved = false;
+  let isBusy = false;
 
   const boardEl = document.getElementById("${widgetId}_board");
   const statusEl = document.getElementById("${widgetId}_status");
+  const errorEl = document.getElementById("${widgetId}_error");
   const resetBtn = document.getElementById("${widgetId}_reset");
   const hintBtn = document.getElementById("${widgetId}_hint_btn");
   const hintBox = document.getElementById("${widgetId}_hint_box");
   const solutionBtn = document.getElementById("${widgetId}_solution_btn");
   const solutionDisplay = document.getElementById("${widgetId}_solution_display");
+
+  function showError(msg) {
+    if (!msg) { errorEl.style.display = "none"; return; }
+    errorEl.textContent = "⚠️ " + msg;
+    errorEl.style.display = "block";
+  }
+
+  // Compare generated SAN (always from chess.js, e.g. "Qh5#") against the
+  // author-written solution token (which may omit the trailing +/# by
+  // oversight, e.g. "Qh5") — only the check/mate suffix is allowed to differ.
+  function sameSan(a, b) {
+    return a.replace(/[+#]+$/, "") === b.replace(/[+#]+$/, "");
+  }
 
   function parseFenBoard(f) {
     const parts = f.split(" ");
@@ -750,11 +998,30 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
     return board;
   }
 
+  function askPromotion(moverColor) {
+    return new Promise((resolve) => {
+      const picker = document.createElement("div");
+      picker.className = "promotion-picker";
+      ["q", "r", "b", "n"].forEach((p) => {
+        const btn = document.createElement("button");
+        btn.innerHTML = PIECE_SVGS[moverColor + p.toUpperCase()] || p;
+        btn.addEventListener("click", () => {
+          picker.remove();
+          resolve(p);
+        });
+        picker.appendChild(btn);
+      });
+      boardEl.parentElement.appendChild(picker);
+    });
+  }
+
   function renderBoard() {
     boardEl.innerHTML = "";
     const boardState = parseFenBoard(currentFen);
     const files = orientation === "white" ? ["a","b","c","d","e","f","g","h"] : ["h","g","f","e","d","c","b","a"];
     const ranks = orientation === "white" ? [8,7,6,5,4,3,2,1] : [1,2,3,4,5,6,7,8];
+    const destSquares = {};
+    legalMoves.forEach((m) => { destSquares[m.to] = m; });
 
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
@@ -765,9 +1032,14 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
 
         const sqDiv = document.createElement("div");
         sqDiv.className = "chess-sq " + (isLight ? "light" : "dark");
+        sqDiv.dataset.sq = sq;
 
         if (selectedSquare === sq) {
           sqDiv.classList.add("selected");
+        }
+        if (destSquares[sq]) {
+          sqDiv.classList.add("dest");
+          if (boardState[sq]) sqDiv.classList.add("has-piece");
         }
 
         if (boardState[sq]) {
@@ -797,22 +1069,110 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
     }
   }
 
-  function handleSquareClick(sq, boardState) {
-    if (selectedSquare === sq) {
-      selectedSquare = null;
-      renderBoard();
+  async function playOpponentReply() {
+    if (currentStep >= solutionMoves.length) return;
+    const san = solutionMoves[currentStep];
+    const result = await syscall("chess.applySan", currentFen, san);
+    if (result && result.error) {
+      // Solution data itself is malformed — surface it instead of silently
+      // getting stuck.
+      showError("Dữ liệu đáp án bị lỗi ở nước \\"" + san + "\\": " + result.error);
       return;
     }
+    currentFen = result.fen;
+    currentStep++;
+    renderBoard();
+  }
 
-    if (!selectedSquare) {
-      if (boardState[sq]) {
-        selectedSquare = sq;
+  async function handleSquareClick(sq, boardState) {
+    if (isBusy || solved) return;
+
+    const attemptedMove = selectedSquare ? legalMoves.find((m) => m.to === sq) : null;
+    if (selectedSquare && attemptedMove) {
+      const from = selectedSquare;
+      isBusy = true;
+      selectedSquare = null;
+      legalMoves = [];
+      try {
+        let promotion = undefined;
+        if (attemptedMove.promotion) {
+          const moverColor = currentFen.split(" ")[1] === "w" ? "w" : "b";
+          promotion = await askPromotion(moverColor);
+        }
+        const result = await syscall("chess.applyMove", currentFen, from, sq, promotion);
+        if (result && result.error) {
+          renderBoard();
+          return;
+        }
+        const expected = solutionMoves[currentStep];
+        if (!expected || !sameSan(result.san, expected)) {
+          statusEl.className = "puzzle-banner wrong";
+          statusEl.innerHTML = "<span>❌ Chưa đúng, thử lại (nước vừa đi sẽ không được tính).</span>";
+          renderBoard();
+          return;
+        }
+
+        // Correct: commit the move, then auto-play any forced opponent reply.
+        currentFen = result.fen;
+        currentStep++;
+        showError(null);
+
+        if (currentStep >= solutionMoves.length) {
+          solved = true;
+          statusEl.className = "puzzle-banner correct";
+          statusEl.innerHTML = "<span>🎉 Chính xác! Bạn đã giải xong bài tập.</span>";
+          renderBoard();
+          return;
+        }
+
+        statusEl.className = "puzzle-banner correct";
+        statusEl.innerHTML = "<span>✅ Đúng! Đối phương đang đi tiếp...</span>";
         renderBoard();
+        await new Promise((r) => setTimeout(r, 500));
+        await playOpponentReply();
+        if (currentStep >= solutionMoves.length) {
+          solved = true;
+          statusEl.className = "puzzle-banner correct";
+          statusEl.innerHTML = "<span>🎉 Chính xác! Bạn đã giải xong bài tập.</span>";
+        } else {
+          statusEl.className = "puzzle-banner pending";
+          statusEl.innerHTML = "<span>🤔 Tiếp tục nào!</span>";
+        }
+      } finally {
+        isBusy = false;
       }
       return;
     }
 
-    selectedSquare = null;
+    if (selectedSquare === sq) {
+      selectedSquare = null;
+      legalMoves = [];
+      renderBoard();
+      return;
+    }
+
+    if (!boardState[sq]) {
+      selectedSquare = null;
+      legalMoves = [];
+      renderBoard();
+      return;
+    }
+
+    const activeColor = currentFen.split(" ")[1] === "w" ? "w" : "b";
+    if (boardState[sq][0] !== activeColor) {
+      selectedSquare = null;
+      legalMoves = [];
+      renderBoard();
+      return;
+    }
+
+    selectedSquare = sq;
+    isBusy = true;
+    try {
+      legalMoves = await syscall("chess.legalMoves", currentFen, sq) || [];
+    } finally {
+      isBusy = false;
+    }
     renderBoard();
   }
 
@@ -820,6 +1180,9 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
     currentFen = startFen;
     currentStep = 0;
     selectedSquare = null;
+    legalMoves = [];
+    solved = false;
+    showError(null);
     statusEl.className = "puzzle-banner pending";
     statusEl.innerHTML = "<span>🤔 Puzzle reset. Find the best move!</span>";
     renderBoard();

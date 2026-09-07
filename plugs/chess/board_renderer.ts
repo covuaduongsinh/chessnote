@@ -413,6 +413,41 @@ html, body {
 .puzzle-banner.correct { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
 .puzzle-banner.wrong { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
 
+.chess-error-banner {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 12px;
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.promotion-picker {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  background: rgba(15, 23, 42, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.promotion-picker button {
+  width: 48px;
+  height: 48px;
+  border: 2px solid #38bdf8;
+  border-radius: 8px;
+  background: #1e293b;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.promotion-picker button:hover { background: #334155; }
+
 .puzzle-hint-box {
   background: rgba(245, 158, 11, 0.15);
   color: #fbbf24;

@@ -38,10 +38,15 @@ Dùng để phân tích biên bản ván đấu hoàn chỉnh. Bấm vào bất 
 Dùng để tự luyện tập hoặc soạn bài tập chiến thuật cho học viên. Người giải có thể xem gợi ý và xem đáp án khi cần.
 
 ```puzzle
-fen: r1bqk2r/pp2bppp/2n1p3/2ppP3/3P4/2PB1N2/P1P2PPP/R1BQK2R w KQkq - 0 8
+fen: 5rk1/5ppp/8/8/8/3B1N2/8/3QKR2 w - - 0 1
 turn: white
 solution: Bxh7+ Kxh7 Ng5+ Kg8 Qh5
 hint: Đòn thí Tượng kinh điển phá thành (Greek Gift Sacrifice)
 themes: Sacrifice, Kingside Attack
 rating: 1650
 ```
+
+> **Lưu ý (2026-09-07)**: FEN gốc trước đây (vua đen còn ở e8, chưa nhập thành) không khớp
+> với chuỗi đáp án — `Kxh7` không hợp lệ về luật cờ trên vị trí đó. Đã thay bằng vị trí có
+> vua đen đã nhập thành cánh vua, kiểm chứng toàn bộ 5 nước hợp lệ bằng chess.js trước khi
+> đưa vào. Xem `docs/plans/2026-09-07-danh-gia-va-ke-hoach-hoan-thien-chessnote.md`.
