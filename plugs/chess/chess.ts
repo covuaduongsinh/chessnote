@@ -1,6 +1,6 @@
 import { Chess } from "chess.js";
 import { CHESS_CSS, PIECE_SVGS } from "./board_renderer.ts";
-import { reviewGame } from "./engine/game_reviewer.ts";
+import { buildMoveList } from "./engine/game_reviewer.ts";
 
 function escapeHtml(str: string): string {
   return str
@@ -570,9 +570,12 @@ export async function fenWidget(bodyText: string, _pageName: string) {
 }
 
 /**
- * PGN Code Widget with automated game review (heuristic) & a live heuristic
- * eval bar. See the note on fenWidget above: no real chess engine is wired
- * in yet, this is not Arasan/Stockfish analysis.
+ * PGN Code Widget with a live Arasan (NNUE, WASM) eval bar and an on-demand
+ * full-game "Game Review" (also real Arasan analysis, one search per
+ * position — see reviewGame() in engine/game_reviewer.ts). The move
+ * list/navigation itself (buildMoveList()) stays chess.js-only and
+ * synchronous so browsing the game is instant regardless of whether a full
+ * review has been run.
  */
 export async function pgnWidget(bodyText: string, _pageName: string) {
   const trimmedPgn = bodyText.trim();
@@ -599,8 +602,10 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
   const date = header["Date"] || "";
   const eco = header["ECO"] || "";
 
-  // Perform full game review
-  const reviewReport = reviewGame(bodyText.trim());
+  // Cheap, chess.js-only move list for navigation — the real (engine-backed)
+  // full review is fetched lazily via the chess.reviewGame syscall, only
+  // when the user clicks "Game Review" (see the widget script below).
+  const moveList = buildMoveList(bodyText.trim());
 
   const initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w KQkq - 0 1";
   const widgetId = `chess_pgn_${Math.random().toString(36).substring(2, 9)}`;
@@ -636,15 +641,16 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
       </div>
       
       <div class="review-report-box" id="${widgetId}_review_box" style="display: none;">
-        <div class="accuracy-row">
-          <span class="accuracy-white">⚪ ${escapeHtml(white)}: <strong>${reviewReport.whiteAccuracy}%</strong></span>
-          <span class="accuracy-black">⚫ ${escapeHtml(black)}: <strong>${reviewReport.blackAccuracy}%</strong></span>
+        <div class="accuracy-row" id="${widgetId}_accuracy_row" style="display: none;">
+          <span class="accuracy-white">⚪ ${escapeHtml(white)}: <strong id="${widgetId}_white_acc">-</strong></span>
+          <span class="accuracy-black">⚫ ${escapeHtml(black)}: <strong id="${widgetId}_black_acc">-</strong></span>
         </div>
+        <div class="review-status" id="${widgetId}_review_status"></div>
       </div>
 
       <div class="chess-engine-panel" id="${widgetId}_engine_panel" style="display: none;">
         <div class="engine-line">
-          <span>Engine: <strong>Heuristic (no real engine yet)</strong></span>
+          <span>Engine: <strong>Arasan (NNUE, WASM)</strong></span>
           <span class="engine-score" id="${widgetId}_engine_score">Eval: 0.0</span>
         </div>
       </div>
@@ -662,13 +668,17 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
 (function() {
   const PIECE_SVGS = ${JSON.stringify(PIECE_SVGS)};
   const initialFen = ${JSON.stringify(initialFen)};
-  const reviewedMoves = ${JSON.stringify(reviewReport.moves)};
+  const reviewedMoves = ${JSON.stringify(moveList)};
   const rawPgn = ${JSON.stringify(bodyText.trim())};
-  
+
   let currentIdx = -1;
   let orientation = "white";
   let isEngineOn = false;
   let isReviewOn = false;
+  let fullReview = null;
+  let reviewRequestSeq = 0;
+  let lastEvalFen = null;
+  let evalRequestSeq = 0;
 
   const boardEl = document.getElementById("${widgetId}_board");
   const arrowsEl = document.getElementById("${widgetId}_arrows");
@@ -688,6 +698,10 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
   const enginePanel = document.getElementById("${widgetId}_engine_panel");
   const engineScoreEl = document.getElementById("${widgetId}_engine_score");
   const reviewBox = document.getElementById("${widgetId}_review_box");
+  const accuracyRowEl = document.getElementById("${widgetId}_accuracy_row");
+  const whiteAccEl = document.getElementById("${widgetId}_white_acc");
+  const blackAccEl = document.getElementById("${widgetId}_black_acc");
+  const reviewStatusEl = document.getElementById("${widgetId}_review_status");
 
   function parseFenBoard(f) {
     const parts = f.split(" ");
@@ -714,20 +728,41 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
     return currentIdx === -1 ? initialFen : reviewedMoves[currentIdx].fenAfter;
   }
 
-  function updateEvalDisplay() {
+  // Real Arasan (NNUE, WASM) analysis of whatever position is currently
+  // shown, via the same chess.engineEval syscall fenWidget uses — analyzes
+  // one position at a time as the user steps through the game, independent
+  // of the (much slower, on-demand) full-game "Game Review" below.
+  async function updateEngineEval() {
     if (!isEngineOn) return;
-    let score = 0;
-    if (currentIdx >= 0) {
-      score = reviewedMoves[currentIdx].scoreAfter;
+    const fen = getCurrentFen();
+    if (fen === lastEvalFen) return;
+    const mySeq = ++evalRequestSeq;
+    engineScoreEl.innerText = "Đang phân tích...";
+    evalTextEl.innerText = "…";
+    try {
+      const result = await syscall("chess.engineEval", fen, 12);
+      if (mySeq !== evalRequestSeq) return; // a newer position was requested meanwhile
+      lastEvalFen = fen;
+      let scoreStr;
+      let winChance;
+      if (result.mateIn !== null && result.mateIn !== undefined) {
+        scoreStr = (result.mateIn > 0 ? "M" + result.mateIn : "-M" + Math.abs(result.mateIn));
+        winChance = result.mateIn > 0 ? 99 : 1;
+      } else {
+        const cp = result.scoreCp || 0;
+        const pawns = (cp / 100).toFixed(1);
+        scoreStr = cp > 0 ? "+" + pawns : String(pawns);
+        winChance = 100 / (1 + Math.exp(-0.00368208 * cp));
+      }
+      engineScoreEl.innerText = "Arasan eval: " + scoreStr + (result.depth ? " (depth " + result.depth + ")" : "");
+      evalTextEl.innerText = scoreStr;
+      evalFillEl.style.height = Math.max(5, Math.min(95, winChance)) + "%";
+    } catch (e) {
+      if (mySeq !== evalRequestSeq) return;
+      lastEvalFen = null;
+      engineScoreEl.innerText = "⚠️ " + (e && e.message ? e.message : "Không thể phân tích");
+      evalTextEl.innerText = "–";
     }
-    const pawns = (score / 100).toFixed(1);
-    const scoreStr = score > 0 ? "+" + pawns : pawns;
-    
-    engineScoreEl.innerText = "Eval: " + scoreStr;
-    evalTextEl.innerText = scoreStr;
-    
-    const winChance = 100 / (1 + Math.exp(-0.00368208 * score));
-    evalFillEl.style.height = Math.max(5, Math.min(95, winChance)) + "%";
   }
 
   function renderBoard() {
@@ -774,7 +809,7 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
       }
     }
     updateTreeHighlight();
-    updateEvalDisplay();
+    updateEngineEval();
   }
 
   function getBadgeHtml(cls) {
@@ -850,13 +885,49 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
     evalToggleBtn.classList.toggle("active", isEngineOn);
     evalBarEl.style.display = isEngineOn ? "flex" : "none";
     enginePanel.style.display = isEngineOn ? "flex" : "none";
-    updateEvalDisplay();
+    if (!isEngineOn) {
+      evalRequestSeq++; // invalidate any in-flight analysis
+      lastEvalFen = null;
+    }
+    updateEngineEval();
   });
+
+  // Full-game review is a real (slow) engine batch job — fetched lazily on
+  // first toggle-on via the chess.reviewGame syscall, then cached in
+  // fullReview so re-toggling doesn't re-run it.
+  async function ensureFullReview() {
+    if (fullReview) return;
+    const mySeq = ++reviewRequestSeq;
+    reviewStatusEl.classList.remove("error");
+    reviewStatusEl.style.display = "block";
+    reviewStatusEl.innerText = "⏳ Đang phân tích toàn bộ ván bằng Arasan thật (" +
+      reviewedMoves.length + " nước đi — có thể mất khá lâu)...";
+    accuracyRowEl.style.display = "none";
+    try {
+      const report = await syscall("chess.reviewGame", rawPgn, 12);
+      if (mySeq !== reviewRequestSeq) return;
+      fullReview = report;
+      report.moves.forEach((m, idx) => {
+        if (reviewedMoves[idx]) Object.assign(reviewedMoves[idx], m);
+      });
+      whiteAccEl.innerText = report.whiteAccuracy + "%";
+      blackAccEl.innerText = report.blackAccuracy + "%";
+      accuracyRowEl.style.display = "flex";
+      reviewStatusEl.style.display = "none";
+      renderTree();
+    } catch (e) {
+      if (mySeq !== reviewRequestSeq) return;
+      reviewStatusEl.classList.add("error");
+      reviewStatusEl.style.display = "block";
+      reviewStatusEl.innerText = "⚠️ " + (e && e.message ? e.message : "Không thể phân tích ván này.");
+    }
+  }
 
   reviewToggleBtn.addEventListener("click", () => {
     isReviewOn = !isReviewOn;
     reviewToggleBtn.classList.toggle("active", isReviewOn);
     reviewBox.style.display = isReviewOn ? "flex" : "none";
+    if (isReviewOn) ensureFullReview();
     renderTree();
   });
 

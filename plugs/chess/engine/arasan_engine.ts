@@ -1,6 +1,7 @@
 // Real UCI engine analysis via Arasan (MIT-licensed chess engine, NNUE
-// evaluation) compiled to WebAssembly with Emscripten. Replaces the
-// evaluatePositionHeuristic() placeholder in game_reviewer.ts.
+// evaluation) compiled to WebAssembly with Emscripten. Used by both
+// chess.ts's "Engine Eval" buttons (single-position, live) and
+// game_reviewer.ts's reviewGame() (one call per position in a full game).
 //
 // The engine binary (~925KB .wasm) and its NNUE network (~25MB .nnue) are
 // NOT bundled into this plug's own JS — they live as data files under
@@ -33,6 +34,7 @@
 // so there is no persistent process to manage. The engine's own binary and
 // network bytes are cached across calls (space.readFile is only paid once).
 
+import { Chess } from "chess.js";
 import { space } from "@silverbulletmd/silverbullet/syscalls";
 // @ts-expect-error -- Emscripten-generated JS glue (build/build_client.ts
 // doesn't compile it, no .d.ts shipped); typed as `any` at the call sites below.
@@ -119,6 +121,22 @@ function parseUciOutput(lines: string[]): EngineResult {
  * installed in this Space.
  */
 export async function evalPosition(fen: string, depth = 12): Promise<EngineResult> {
+  // A position with no legal moves (checkmate/stalemate) has nothing to
+  // search — asking Arasan anyway produces UCI output parseUciOutput() can't
+  // turn into a meaningful score, which used to surface as a misleading
+  // "eval: 0.0" on an actually-decisive position. Short-circuit locally.
+  if (new Chess(fen).isGameOver()) {
+    const mated = new Chess(fen).isCheckmate();
+    return {
+      bestMove: null,
+      scoreCp: mated ? null : 0,
+      mateIn: mated ? -1 : null, // the side to move has already been mated
+      depth: null,
+      pv: [],
+      raw: [],
+    };
+  }
+
   const { wasm, nnue } = await getEngineBytes();
 
   const outputLines: string[] = [];

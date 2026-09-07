@@ -450,14 +450,80 @@ Chrome DevTools Protocol có thể trượt mất phần tử `<button>` nằm b
 khi nghi ngờ) và bằng harness Node độc lập gọi thẳng `evalPosition()`. Cả hai đều cho kết quả
 khớp nhau.
 
-**Bàn giao (chưa làm trong đợt này, ghi nhận là phạm vi còn lại)**: `pgnWidget`'s "Engine Eval"
-riêng và `engine/game_reviewer.ts`'s heuristic chấm điểm cả ván (`reviewGame()`) vẫn dùng
-`evaluatePositionHeuristic()` cũ, chưa nối sang Arasan thật — nhãn UI của `pgnWidget` cố tình
-**giữ nguyên** "Heuristic (no real engine yet)" cho trung thực với hiện trạng. Lý do để lại:
-chạy Arasan (khởi tạo module WASM mới + nạp lại NNUE 25MB) cho **từng nước đi** trong một ván
-dài sẽ rất chậm nếu làm ngây thơ — cần thiết kế lại (ví dụ: giữ một module instance sống xuyên
-suốt ván thay vì tạo mới mỗi lần gọi `evalPosition()`) trước khi wiring, nằm ngoài phạm vi
-"tích hợp nút Engine Eval" của lượt này.
+## 3d. NHẬT KÝ TRIỂN KHAI — Giai đoạn 2 (tiếp): `pgnWidget` + `game_reviewer.ts`
+
+> Cập nhật 2026-09-07 (tiếp nối 3c). Phần còn lại được bàn giao ở 3c ("chạy Arasan cho từng
+> nước đi trong một ván dài sẽ rất chậm nếu làm ngây thơ") — đo thực tế thay vì đoán trước khi
+> quyết định cách làm.
+
+**Đo hiệu năng trước khi thiết kế**: benchmark bằng harness Node độc lập, một vị trí trung cuộc
+bận rộn (Italian Game, ~6 nước), ở các depth 8/10/12 — mỗi lần khởi tạo module WASM mới + nạp
+lại NNUE 25MB từ đầu. Kết quả: **~0.4–0.7 giây/vị trí, không phụ thuộc nhiều vào depth** (phần
+lớn thời gian là NNUE forward-pass + search, không phải chi phí khởi tạo module — dữ liệu
+NNUE/wasm đã cache sẵn ở cấp module sau lần đọc `space.readFile` đầu tiên). Kết luận: **tạo mới
+module mỗi vị trí là đủ nhanh**, KHÔNG cần thiết kế "giữ một engine sống xuyên suốt ván" như lo
+ngại ban đầu ở 3c — một ván 40 nước (~80 nửa nước) ước tính ~40 giây tổng, chấp nhận được cho
+một thao tác "phân tích cả ván" người dùng chủ động bấm (tương tự thời gian chờ "Server Analysis"
+của lichess).
+
+**Thiết kế**: tách `game_reviewer.ts` thành hai phần theo đúng ranh giới "rẻ, đồng bộ" vs "đắt,
+bất đồng bộ":
+- `buildMoveList(pgn)` — chỉ dùng chess.js, đồng bộ, dựng danh sách nước đi (SAN/from/to/FEN
+  trước+sau) để `pgnWidget` **luôn** duyệt ván được tức thì, không phụ thuộc việc đã "Game
+  Review" hay chưa.
+- `reviewGame(pgn, depth)` — nay là `async`, gọi `evalPosition()` **một lần cho mỗi vị trí** dọc
+  ván (N+1 lần cho N nước — điểm "sau" của nước i chính là điểm "trước" của nước i+1, không cần
+  2N lần, chưa nói tới số N×N lần kiểu brute-force cũ). Vị trí hết nước đi (chiếu hết/hết nước) được xử
+  lý ngay trong code bằng chess.js, **không gọi engine** (không có gì để tìm kiếm, và output UCI
+  cho vị trí không nước đi hợp lệ không có ý nghĩa để `parseUciOutput()` phân tích).
+- Thêm syscall `chess.reviewGame` (`chess.plug.yaml`) — **chỉ gọi khi người dùng bấm "📊 Game
+  Review"**, không bao giờ gọi lúc render widget (khác hẳn code cũ, vốn chạy `reviewGame()`
+  đồng bộ ngay khi trang mở ra — chấp nhận được với heuristic tức thời, nhưng sẽ làm treo cả
+  trang nhiều chục giây nếu đổi thẳng sang engine thật mà không tách ra).
+- `pgnWidget`'s nút "⚡ Engine Eval" đổi sang phân tích **trực tiếp vị trí đang xem** qua
+  `chess.engineEval` (y hệt cơ chế đã có ở `fenWidget`) thay vì đọc điểm đã tính sẵn từ
+  `reviewGame()` — tách biệt hoàn toàn khỏi "Game Review" (đánh giá nhanh một vị trí ≠ phân
+  tích chấm điểm cả ván).
+
+**Kiểm thử**: viết lại `engine.test.ts` — mock `evalPosition()` bằng một "engine" tất định dựa
+trên đếm quân qua chính chess.js (không phải wasm thật, môi trường vitest không có
+`space.readFile`), để kiểm chứng đúng logic CPL/phân loại/độ chính xác của `reviewGame()` mà
+không cần engine thật (hành vi UCI thật của Arasan đã được xác minh riêng qua Node/trình duyệt
+ở 3c, không cần lặp lại ở đây). Xác nhận thêm: `reviewGame()` không gọi engine cho vị trí chiếu
+hết (test đếm số lần gọi mock). `npm run check` sạch; `vitest run` toàn repo: 2431 pass, chỉ 1
+lỗi không liên quan từ trước (`client/space_lua/lua.test.ts`, hệ thống Lua, không đụng tới
+plugs/chess).
+
+**Kiểm chứng qua trình duyệt thật**: gặp một cạm bẫy công cụ mới (khác với cạm bẫy click-lệch-
+nút của 3c) — click theo toạ độ pixel qua Chrome DevTools Protocol để đưa con trỏ ra ngoài khối
+code (điều kiện để widget hiện ra, xem `client/codemirror/fenced_code.ts`'s `isCursorInRange`)
+**không đáng tin cậy** trong môi trường automation này, dù tính đúng toạ độ dòng CodeMirror cuối
+cùng qua `getBoundingClientRect()`. Test chéo xác nhận: cùng một trang, cùng kỹ thuật click,
+lúc render lúc không — kể cả với `fenWidget` vốn đã chạy ổn định ở 3c. **Cách khắc phục**: dùng
+điều hướng bàn phím (`Ctrl+End` — đưa con trỏ về cuối văn bản) thay cho click chuột để đưa con
+trỏ ra khỏi khối code; ổn định 100% qua nhiều lần thử. Bài học ghi lại để lần sau không mất thời
+gian lặp lại: **click bằng toạ độ trong Chrome DevTools Protocol không đáng tin cậy cho việc kiểm
+tra live-preview của CodeMirror; ưu tiên điều hướng bàn phím (Ctrl+End, phím mũi tên) hoặc gọi
+thẳng `element.click()` qua `javascript_tool` khi cần bấm nút cụ thể**.
+
+Sau khi khắc phục, xác nhận trên **bản release binary** (đã build lại từ code cuối cùng, kể cả
+sau khi sửa lỗi "quit" ở 3c):
+- `pgnWidget` render đúng, subtitle/nhãn engine đã cập nhật ("Arasan (NNUE, WASM)").
+- **⚡ Engine Eval** ở vị trí trước `Qxf7#` (nước 3...Nf6): hiện đúng **"Arasan eval: M1 (depth
+  12)"** — chiếu hết trong 1 nước, chính xác tuyệt đối.
+- **📊 Game Review** (7 nước, gọi `chess.reviewGame`): hiện trạng thái "⏳ Đang phân tích..."
+  đúng lúc đang chạy, sau ~10 giây trả về **White 93.9% — Black 58.6%** (hợp lý: Black chơi tệ,
+  dính Scholar's Mate), cây nước đi hiện đúng badge **"!!" (brilliant)** cho `Qxf7#`, các nước
+  1-3 rơi vào ngưỡng "book" nên không có badge (đúng thiết kế). Không có lỗi console nào ngoài
+  cảnh báo `base_fs.json` đã biết (vô hại, chỉ ảnh hưởng bản mobile).
+
+**Hạn chế nhỏ phát hiện thêm, đã sửa ngay trong lượt này**: nút "Engine Eval" gọi thẳng
+`chess.engineEval` trên FEN đang xem — nếu vị trí đó đã hết nước đi (chiếu hết), engine không có
+gì để tìm kiếm và hiển thị nhầm thành "Arasan eval: 0.0" thay vì phản ánh đúng kết quả chiếu hết.
+Đã chuyển lớp bảo vệ "kiểm tra hết nước đi bằng chess.js trước khi gọi engine" từ `reviewGame()`
+vào thẳng `evalPosition()` (`arasan_engine.ts`) — dùng chung cho mọi lối gọi (`chess.engineEval`
+trực tiếp của cả `fenWidget` lẫn `pgnWidget`, và gián tiếp qua `reviewGame()`), thay vì chỉ
+`reviewGame()` được bảo vệ như trước.
 
 ---
 

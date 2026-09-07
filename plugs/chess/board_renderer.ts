@@ -399,6 +399,15 @@ html, body {
 .accuracy-white { color: #f8fafc; }
 .accuracy-black { color: #94a3b8; }
 
+.review-status {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.review-status.error {
+  color: #ef4444;
+  font-weight: 600;
+}
+
 .puzzle-banner {
   padding: 8px 12px;
   border-radius: 6px;

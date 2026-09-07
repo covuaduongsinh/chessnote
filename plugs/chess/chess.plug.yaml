@@ -56,3 +56,17 @@ functions:
         - { name: depth, type: number }
       returns:
         - { type: object }
+  chessReviewGame:
+    path: ./engine/game_reviewer.ts:reviewGame
+    syscall:
+      name: chess.reviewGame
+      description: >-
+        Full real-engine (Arasan) review of a PGN game: evaluates every position
+        with the real engine and classifies each move by centipawn loss. Slow
+        (roughly N+1 engine searches for N plies) — an on-demand batch job, not
+        something to call at render time.
+      parameters:
+        - { name: pgn, type: string }
+        - { name: depth, type: number }
+      returns:
+        - { type: object }
