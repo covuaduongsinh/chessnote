@@ -1,4 +1,6 @@
 name: chess
+requiredPermissions:
+  - fetch
 functions:
   fenWidget:
     path: ./chess.ts:fenWidget
@@ -70,3 +72,72 @@ functions:
         - { name: depth, type: number }
       returns:
         - { type: object }
+  chessAiInit:
+    path: ./ai/bridge.ts:initAiConfig
+    events:
+      - editor:init
+  chessAiStatus:
+    path: ./ai/bridge.ts:aiStatus
+    syscall:
+      name: chess.ai.status
+      description: >-
+        Status of the personal AI subscription-bridge (ai-sidecar/): whether
+        the Claude Code CLI is logged in. Three-state: connected/unknown/stale
+        — a timeout or sidecar-not-running is never reported as "logged out".
+      returns:
+        - { type: object }
+  chessAiAuthStart:
+    path: ./ai/bridge.ts:aiAuthStart
+    syscall:
+      name: chess.ai.authStart
+      description: >-
+        Starts a Claude Code CLI login flow via the sidecar and returns the
+        login URL to open on the user's own machine.
+      returns:
+        - { type: object }
+  chessAiAuthCode:
+    path: ./ai/bridge.ts:aiAuthCode
+    syscall:
+      name: chess.ai.authCode
+      description: Submits the pasted login code to the pending CLI login session.
+      parameters:
+        - { name: code, type: string }
+      returns:
+        - { type: object }
+  chessAiAuthLogout:
+    path: ./ai/bridge.ts:aiAuthLogout
+    syscall:
+      name: chess.ai.authLogout
+      description: Logs the Claude Code CLI out via the sidecar.
+      returns:
+        - { type: object }
+  chessAiAuthCancel:
+    path: ./ai/bridge.ts:aiAuthCancel
+    syscall:
+      name: chess.ai.authCancel
+      description: Cancels a pending CLI login session.
+      returns:
+        - { type: object }
+  chessAiAsk:
+    path: ./ai/bridge.ts:aiAsk
+    syscall:
+      name: chess.ai.ask
+      description: >-
+        Plain-text-only AI generation (no tool calls) via the personal
+        subscription-bridge or a configured API key, per "chess.ai.mode".
+      parameters:
+        - { name: prompt, type: string }
+      returns:
+        - { type: object }
+  chessAiLoginCommand:
+    path: ./ai/bridge.ts:commandAiLogin
+    command:
+      name: "Chess: Đăng nhập AI"
+  chessAiLogoutCommand:
+    path: ./ai/bridge.ts:commandAiLogout
+    command:
+      name: "Chess: Đăng xuất AI"
+  chessAiStatusCommand:
+    path: ./ai/bridge.ts:commandAiStatus
+    command:
+      name: "Chess: Trạng thái AI"
