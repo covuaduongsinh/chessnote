@@ -2,6 +2,10 @@ name: chess
 requiredPermissions:
   - fetch
 functions:
+  indexChessGames:
+    path: ./index.ts:indexChessGames
+    events:
+      - page:index
   fenWidget:
     path: ./chess.ts:fenWidget
     codeWidget: fen
@@ -165,3 +169,7 @@ functions:
     path: ./ai/bridge.ts:commandAiStatus
     command:
       name: "Chess: Trạng thái AI"
+  chessAnalyzeTrendsCommand:
+    path: ./ai/trends.ts:commandAnalyzeTrends
+    command:
+      name: "Chess: Phân tích xu hướng"

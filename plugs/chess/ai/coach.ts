@@ -21,7 +21,7 @@ function formatEval(scoreCentipawns: number): string {
   return scoreCentipawns >= 0 ? `+${pawns}` : pawns;
 }
 
-const CLASSIFICATION_VI: Record<MoveClassification, string> = {
+export const CLASSIFICATION_VI: Record<MoveClassification, string> = {
   brilliant: "xuất sắc (!!)",
   great: "hay (!)",
   best: "nước tốt nhất theo engine",
@@ -32,7 +32,7 @@ const CLASSIFICATION_VI: Record<MoveClassification, string> = {
   book: "nước lý thuyết khai cuộc",
 };
 
-const ANTI_HALLUCINATION_RULE =
+export const ANTI_HALLUCINATION_RULE =
   "Chỉ dựa DUY NHẤT vào số liệu được cung cấp ở trên — KHÔNG suy diễn, KHÔNG bịa thêm " +
   "nước đi, biến thể, hay tình huống nào ngoài số liệu đó.";
 
@@ -77,7 +77,7 @@ export interface GameHeaders {
   eco?: string;
 }
 
-function pickTurningPoints(moves: ReviewedMove[]): ReviewedMove[] {
+export function pickTurningPoints(moves: ReviewedMove[]): ReviewedMove[] {
   return moves
     .filter((m) => TURNING_POINT_CLASSES.includes(m.classification))
     .sort((a, b) => b.cpl - a.cpl)
