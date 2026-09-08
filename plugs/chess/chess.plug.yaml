@@ -137,6 +137,30 @@ functions:
     path: ./ai/bridge.ts:commandAiLogout
     command:
       name: "Chess: Đăng xuất AI"
+  chessAiExplainMove:
+    path: ./ai/coach.ts:explainMove
+    syscall:
+      name: chess.ai.explainMove
+      description: >-
+        Giải thích một nước đi bằng AI, chỉ dựa trên số liệu engine thật đã tính
+        sẵn (classification/cpl/bestMoveSan/eval trước-sau) để chống hallucination.
+      parameters:
+        - { name: input, type: object }
+      returns:
+        - { type: object }
+  chessAiAnnotateGame:
+    path: ./ai/coach.ts:annotateGame
+    syscall:
+      name: chess.ai.annotateGame
+      description: >-
+        Bình luận toàn ván bằng AI (1 lần gọi duy nhất), dựa trên độ chính xác và
+        danh sách bước ngoặt (mistake/blunder/brilliant/great) đã cắt gọn từ
+        chess.reviewGame — không dump toàn bộ nước đi để tránh phình chi phí.
+      parameters:
+        - { name: report, type: object }
+        - { name: headers, type: object }
+      returns:
+        - { type: object }
   chessAiStatusCommand:
     path: ./ai/bridge.ts:commandAiStatus
     command:

@@ -408,6 +408,31 @@ html, body {
   font-weight: 600;
 }
 
+.chess-btn.btn-ai {
+  background: #4c1d95;
+  color: #d8b4fe;
+  border-color: #7c3aed;
+}
+.chess-btn.btn-ai.active {
+  background: #7c3aed;
+  color: #ffffff;
+}
+
+.ai-coach-panel {
+  background: rgba(76, 29, 149, 0.2);
+  border: 1px solid rgba(124, 58, 237, 0.3);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e9d5ff;
+  white-space: pre-wrap;
+}
+.ai-coach-panel.error {
+  color: #ef4444;
+  font-weight: 600;
+}
+
 .puzzle-banner {
   padding: 8px 12px;
   border-radius: 6px;

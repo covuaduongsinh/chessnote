@@ -632,6 +632,8 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
       <div class="chess-controls">
         <button class="chess-btn btn-engine" id="${widgetId}_eval_toggle">⚡ Engine Eval</button>
         <button class="chess-btn" id="${widgetId}_review_toggle">📊 Game Review</button>
+        <button class="chess-btn btn-ai" id="${widgetId}_ai_explain_toggle">🧑‍🏫 AI Giải thích</button>
+        <button class="chess-btn btn-ai" id="${widgetId}_ai_annotate_toggle">📝 AI Bình luận ván</button>
         <button class="chess-btn" id="${widgetId}_first">⏮ First</button>
         <button class="chess-btn" id="${widgetId}_prev">◀ Prev</button>
         <button class="chess-btn" id="${widgetId}_next">▶ Next</button>
@@ -647,6 +649,9 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
         </div>
         <div class="review-status" id="${widgetId}_review_status"></div>
       </div>
+
+      <div class="ai-coach-panel" id="${widgetId}_ai_explain_panel" style="display: none;"></div>
+      <div class="ai-coach-panel" id="${widgetId}_ai_annotate_panel" style="display: none;"></div>
 
       <div class="chess-engine-panel" id="${widgetId}_engine_panel" style="display: none;">
         <div class="engine-line">
@@ -670,6 +675,7 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
   const initialFen = ${JSON.stringify(initialFen)};
   const reviewedMoves = ${JSON.stringify(moveList)};
   const rawPgn = ${JSON.stringify(bodyText.trim())};
+  const gameHeaders = ${JSON.stringify({ white, black, result, eco })};
 
   let currentIdx = -1;
   let orientation = "white";
@@ -679,6 +685,12 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
   let reviewRequestSeq = 0;
   let lastEvalFen = null;
   let evalRequestSeq = 0;
+  let isAiExplainOn = false;
+  let aiExplainSeq = 0;
+  const aiExplainCache = {};
+  let isAnnotateOn = false;
+  let annotateRequestSeq = 0;
+  let annotateResult = null;
 
   const boardEl = document.getElementById("${widgetId}_board");
   const arrowsEl = document.getElementById("${widgetId}_arrows");
@@ -702,6 +714,10 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
   const whiteAccEl = document.getElementById("${widgetId}_white_acc");
   const blackAccEl = document.getElementById("${widgetId}_black_acc");
   const reviewStatusEl = document.getElementById("${widgetId}_review_status");
+  const aiExplainToggleBtn = document.getElementById("${widgetId}_ai_explain_toggle");
+  const aiExplainPanel = document.getElementById("${widgetId}_ai_explain_panel");
+  const aiAnnotateToggleBtn = document.getElementById("${widgetId}_ai_annotate_toggle");
+  const aiAnnotatePanel = document.getElementById("${widgetId}_ai_annotate_panel");
 
   function parseFenBoard(f) {
     const parts = f.split(" ");
@@ -765,6 +781,79 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
     }
   }
 
+  // AI Coach: giải thích nước đang chọn, CHỈ khả dụng sau khi "Game Review" đã
+  // gán cpl/classification/bestMoveSan vào reviewedMoves[idx] (xem
+  // ensureFullReview() bên dưới) — nếu chưa đủ số liệu, không gọi AI, chỉ nhắc.
+  // Kết quả cache theo idx để xem lại nước cũ không tốn tiền gọi lại.
+  async function ensureAiExplain(idx) {
+    if (!isAiExplainOn) return;
+    if (idx < 0 || !reviewedMoves[idx] || reviewedMoves[idx].classification == null) {
+      aiExplainPanel.classList.remove("error");
+      aiExplainPanel.innerText = "Bật \\"Game Review\\" rồi chọn một nước để xem giải thích.";
+      return;
+    }
+    if (aiExplainCache[idx]) {
+      aiExplainPanel.classList.remove("error");
+      aiExplainPanel.innerText = aiExplainCache[idx];
+      return;
+    }
+    const mySeq = ++aiExplainSeq;
+    aiExplainPanel.classList.remove("error");
+    aiExplainPanel.innerText = "⏳ Đang hỏi AI Coach...";
+    try {
+      const result = await syscall("chess.ai.explainMove", reviewedMoves[idx]);
+      if (mySeq !== aiExplainSeq) return; // người dùng đã chuyển sang nước khác
+      if (result.ok) {
+        aiExplainCache[idx] = result.text;
+        aiExplainPanel.innerText = result.text;
+      } else {
+        aiExplainPanel.classList.add("error");
+        aiExplainPanel.innerText = "⚠️ " + result.error;
+      }
+    } catch (e) {
+      if (mySeq !== aiExplainSeq) return;
+      aiExplainPanel.classList.add("error");
+      aiExplainPanel.innerText = "⚠️ " + (e && e.message ? e.message : "Không gọi được AI.");
+    }
+  }
+
+  function updateAiExplain() {
+    if (isAiExplainOn) ensureAiExplain(currentIdx);
+  }
+
+  // Bình luận toàn ván: CHỈ 1 lần gọi AI cho cả ván (không lặp theo từng nước),
+  // dùng toàn bộ fullReview (đã có sau khi bật Game Review) làm ngữ cảnh.
+  async function ensureAnnotate() {
+    if (annotateResult) {
+      aiAnnotatePanel.classList.remove("error");
+      aiAnnotatePanel.innerText = annotateResult;
+      return;
+    }
+    if (!fullReview) {
+      aiAnnotatePanel.classList.remove("error");
+      aiAnnotatePanel.innerText = "Bật \\"Game Review\\" trước để AI có đủ số liệu bình luận.";
+      return;
+    }
+    const mySeq = ++annotateRequestSeq;
+    aiAnnotatePanel.classList.remove("error");
+    aiAnnotatePanel.innerText = "⏳ Đang nhờ AI bình luận toàn ván...";
+    try {
+      const result = await syscall("chess.ai.annotateGame", fullReview, gameHeaders);
+      if (mySeq !== annotateRequestSeq) return;
+      if (result.ok) {
+        annotateResult = result.text;
+        aiAnnotatePanel.innerText = result.text;
+      } else {
+        aiAnnotatePanel.classList.add("error");
+        aiAnnotatePanel.innerText = "⚠️ " + result.error;
+      }
+    } catch (e) {
+      if (mySeq !== annotateRequestSeq) return;
+      aiAnnotatePanel.classList.add("error");
+      aiAnnotatePanel.innerText = "⚠️ " + (e && e.message ? e.message : "Không gọi được AI.");
+    }
+  }
+
   function renderBoard() {
     boardEl.innerHTML = "";
     const currentFen = getCurrentFen();
@@ -810,6 +899,7 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
     }
     updateTreeHighlight();
     updateEngineEval();
+    updateAiExplain();
   }
 
   function getBadgeHtml(cls) {
@@ -929,6 +1019,28 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
     reviewBox.style.display = isReviewOn ? "flex" : "none";
     if (isReviewOn) ensureFullReview();
     renderTree();
+  });
+
+  aiExplainToggleBtn.addEventListener("click", () => {
+    isAiExplainOn = !isAiExplainOn;
+    aiExplainToggleBtn.classList.toggle("active", isAiExplainOn);
+    aiExplainPanel.style.display = isAiExplainOn ? "block" : "none";
+    if (!isAiExplainOn) {
+      aiExplainSeq++; // huỷ mọi lượt gọi AI đang bay dở
+      return;
+    }
+    ensureAiExplain(currentIdx);
+  });
+
+  aiAnnotateToggleBtn.addEventListener("click", () => {
+    isAnnotateOn = !isAnnotateOn;
+    aiAnnotateToggleBtn.classList.toggle("active", isAnnotateOn);
+    aiAnnotatePanel.style.display = isAnnotateOn ? "block" : "none";
+    if (!isAnnotateOn) {
+      annotateRequestSeq++;
+      return;
+    }
+    ensureAnnotate();
   });
 
   copyPgnBtn.addEventListener("click", () => {

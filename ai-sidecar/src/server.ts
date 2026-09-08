@@ -87,15 +87,17 @@ const server = createServer(async (req, res) => {
       const raw = await readBody(req);
       let prompt = "";
       let mode: unknown;
+      let model: string | undefined;
       try {
         const j = JSON.parse(raw || "{}");
         prompt = String(j.prompt || "").trim();
         mode = j.mode;
+        model = typeof j.model === "string" ? j.model : undefined;
       } catch {
         return send(res, 400, { ok: false, error: "JSON không hợp lệ" });
       }
       if (!prompt) return send(res, 400, { ok: false, error: "thiếu prompt" });
-      const r = await generateText(prompt, { mode });
+      const r = await generateText(prompt, { mode, model });
       return send(res, r.ok ? 200 : 500, r);
     }
   } catch (e) {

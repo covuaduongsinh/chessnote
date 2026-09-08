@@ -71,6 +71,15 @@ export async function initAiConfig() {
     default: "",
     ui: { category: "AI", label: "Token ai-sidecar", priority: 3 },
   });
+  await config.define("chess.ai.model", {
+    description:
+      "Model CLI dùng để sinh văn bản (AI Coach/Bình luận ván). Mặc định haiku — rẻ, đủ tốt cho " +
+      "giải thích ngắn. Đổi sang model mạnh hơn (vd. claude-sonnet-4-5) nếu muốn chất lượng cao " +
+      "hơn cho bình luận ván dài, đổi lại tốn nhiều ngân sách gói hơn mỗi lần gọi.",
+    type: "string",
+    default: "claude-haiku-4-5",
+    ui: { category: "AI", label: "Model AI", priority: 4 },
+  });
 }
 
 export async function aiStatus() {
@@ -95,7 +104,8 @@ export async function aiAuthCancel() {
 
 export async function aiAsk(prompt: string) {
   const mode = await config.get<string>("chess.ai.mode", "subscription");
-  return sidecarFetch("/ai/generate", { method: "POST", body: { prompt, mode } });
+  const model = await config.get<string>("chess.ai.model", "claude-haiku-4-5");
+  return sidecarFetch("/ai/generate", { method: "POST", body: { prompt, mode, model } });
 }
 
 const SIDECAR_NOT_RUNNING_HINT =

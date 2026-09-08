@@ -33,6 +33,10 @@ import { envForCli } from "./mode.js";
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 const LOCKED_DOWN_TOOLS = "Read Write Edit Glob Grep WebSearch Task NotebookEdit Bash";
+// Chỉ chấp nhận tên model dạng chữ/số/./-/_ — chặn giá trị rác lọt vào argv.
+// spawn() dùng mảng args (không qua shell) nên không có rủi ro injection shell dù
+// thiếu whitelist này; đây chỉ là vệ sinh input, không phải lớp bảo mật bắt buộc.
+const MODEL_NAME_RE = /^[a-zA-Z0-9._-]+$/;
 
 export type GenerateResult =
   | { ok: true; text: string }
@@ -40,7 +44,7 @@ export type GenerateResult =
 
 export async function generateText(
   prompt: string,
-  opts: { mode?: unknown; timeoutMs?: number } = {},
+  opts: { mode?: unknown; model?: string; timeoutMs?: number } = {},
 ): Promise<GenerateResult> {
   const timeoutMs = opts.timeoutMs ?? 45_000;
   const args = [
@@ -53,6 +57,9 @@ export async function generateText(
     "--output-format",
     "json",
   ];
+  if (typeof opts.model === "string" && MODEL_NAME_RE.test(opts.model)) {
+    args.push("--model", opts.model);
+  }
 
   return new Promise((resolve) => {
     let done = false;
