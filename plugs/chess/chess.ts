@@ -577,7 +577,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
  * synchronous so browsing the game is instant regardless of whether a full
  * review has been run.
  */
-export async function pgnWidget(bodyText: string, _pageName: string) {
+export async function pgnWidget(bodyText: string, pageName: string) {
   const trimmedPgn = bodyText.trim();
   let chess: Chess;
   try {
@@ -634,6 +634,7 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
         <button class="chess-btn" id="${widgetId}_review_toggle">📊 Game Review</button>
         <button class="chess-btn btn-ai" id="${widgetId}_ai_explain_toggle">🧑‍🏫 AI Giải thích</button>
         <button class="chess-btn btn-ai" id="${widgetId}_ai_annotate_toggle">📝 AI Bình luận ván</button>
+        <button class="chess-btn btn-ai" id="${widgetId}_ai_tag_toggle">🏷️ AI Gợi ý tag</button>
         <button class="chess-btn" id="${widgetId}_first">⏮ First</button>
         <button class="chess-btn" id="${widgetId}_prev">◀ Prev</button>
         <button class="chess-btn" id="${widgetId}_next">▶ Next</button>
@@ -652,6 +653,7 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
 
       <div class="ai-coach-panel" id="${widgetId}_ai_explain_panel" style="display: none;"></div>
       <div class="ai-coach-panel" id="${widgetId}_ai_annotate_panel" style="display: none;"></div>
+      <div class="ai-coach-panel" id="${widgetId}_ai_tag_panel" style="display: none;"></div>
 
       <div class="chess-engine-panel" id="${widgetId}_engine_panel" style="display: none;">
         <div class="engine-line">
@@ -675,7 +677,8 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
   const initialFen = ${JSON.stringify(initialFen)};
   const reviewedMoves = ${JSON.stringify(moveList)};
   const rawPgn = ${JSON.stringify(bodyText.trim())};
-  const gameHeaders = ${JSON.stringify({ white, black, result, eco })};
+  const gameHeaders = ${JSON.stringify({ white, black, result, eco, event })};
+  const pageName = ${JSON.stringify(pageName)};
 
   let currentIdx = -1;
   let orientation = "white";
@@ -691,6 +694,9 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
   let isAnnotateOn = false;
   let annotateRequestSeq = 0;
   let annotateResult = null;
+  let isTagSuggestOn = false;
+  let tagSuggestRequestSeq = 0;
+  let tagSuggestResult = null; // { tags, summary } | { error }
 
   const boardEl = document.getElementById("${widgetId}_board");
   const arrowsEl = document.getElementById("${widgetId}_arrows");
@@ -718,6 +724,8 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
   const aiExplainPanel = document.getElementById("${widgetId}_ai_explain_panel");
   const aiAnnotateToggleBtn = document.getElementById("${widgetId}_ai_annotate_toggle");
   const aiAnnotatePanel = document.getElementById("${widgetId}_ai_annotate_panel");
+  const aiTagToggleBtn = document.getElementById("${widgetId}_ai_tag_toggle");
+  const aiTagPanel = document.getElementById("${widgetId}_ai_tag_panel");
 
   function parseFenBoard(f) {
     const parts = f.split(" ");
@@ -851,6 +859,80 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
       if (mySeq !== annotateRequestSeq) return;
       aiAnnotatePanel.classList.add("error");
       aiAnnotatePanel.innerText = "⚠️ " + (e && e.message ? e.message : "Không gọi được AI.");
+    }
+  }
+
+  // Gợi ý tag + tóm tắt: 1 lần gọi AI (cache trong phiên widget này), người dùng
+  // phải bấm "Áp dụng" mới thật sự ghi vào frontmatter — không có gì tự động ghi
+  // đè dữ liệu ghi chú chỉ vì mở widget lên xem.
+  function renderTagSuggest() {
+    if (!tagSuggestResult) return;
+    aiTagPanel.innerHTML = "";
+    if (tagSuggestResult.error) {
+      aiTagPanel.classList.add("error");
+      aiTagPanel.innerText = "⚠️ " + tagSuggestResult.error;
+      return;
+    }
+    aiTagPanel.classList.remove("error");
+    const tagsLine = document.createElement("div");
+    tagsLine.innerText = "Tag gợi ý: " + tagSuggestResult.tags.map((t) => "#" + t).join(" ");
+    const summaryLine = document.createElement("div");
+    summaryLine.innerText = "Tóm tắt: " + tagSuggestResult.summary;
+    const applyRow = document.createElement("div");
+    applyRow.style.marginTop = "6px";
+    const applyBtn = document.createElement("button");
+    applyBtn.className = "chess-btn btn-ai";
+    applyBtn.innerText = "✅ Áp dụng vào ghi chú";
+    const applyStatus = document.createElement("span");
+    applyStatus.style.marginLeft = "8px";
+    applyBtn.addEventListener("click", async () => {
+      applyBtn.disabled = true;
+      applyStatus.innerText = "⏳ Đang áp dụng...";
+      try {
+        const result = await syscall(
+          "chess.applyTagSuggestion",
+          pageName,
+          tagSuggestResult.tags,
+          tagSuggestResult.summary,
+        );
+        if (result && result.ok) {
+          applyStatus.innerText = "✓ Đã áp dụng vào frontmatter.";
+        } else {
+          applyBtn.disabled = false;
+          applyStatus.innerText = "⚠️ " + ((result && result.error) || "Không áp dụng được.");
+        }
+      } catch (e) {
+        applyBtn.disabled = false;
+        applyStatus.innerText = "⚠️ " + (e && e.message ? e.message : "Không áp dụng được.");
+      }
+    });
+    applyRow.appendChild(applyBtn);
+    applyRow.appendChild(applyStatus);
+    aiTagPanel.appendChild(tagsLine);
+    aiTagPanel.appendChild(summaryLine);
+    aiTagPanel.appendChild(applyRow);
+  }
+
+  async function ensureTagSuggest() {
+    if (tagSuggestResult) {
+      renderTagSuggest();
+      return;
+    }
+    const mySeq = ++tagSuggestRequestSeq;
+    aiTagPanel.classList.remove("error");
+    aiTagPanel.innerText = "⏳ Đang hỏi AI gợi ý tag...";
+    try {
+      const openingMoves = reviewedMoves.slice(0, 12).map((m) => m.san).join(" ");
+      const result = await syscall("chess.ai.suggestTags", { ...gameHeaders, openingMoves });
+      if (mySeq !== tagSuggestRequestSeq) return;
+      tagSuggestResult = result.ok
+        ? { tags: result.tags, summary: result.summary }
+        : { error: result.error };
+      renderTagSuggest();
+    } catch (e) {
+      if (mySeq !== tagSuggestRequestSeq) return;
+      tagSuggestResult = { error: (e && e.message) || "Không gọi được AI." };
+      renderTagSuggest();
     }
   }
 
@@ -1041,6 +1123,17 @@ export async function pgnWidget(bodyText: string, _pageName: string) {
       return;
     }
     ensureAnnotate();
+  });
+
+  aiTagToggleBtn.addEventListener("click", () => {
+    isTagSuggestOn = !isTagSuggestOn;
+    aiTagToggleBtn.classList.toggle("active", isTagSuggestOn);
+    aiTagPanel.style.display = isTagSuggestOn ? "block" : "none";
+    if (!isTagSuggestOn) {
+      tagSuggestRequestSeq++;
+      return;
+    }
+    ensureTagSuggest();
   });
 
   copyPgnBtn.addEventListener("click", () => {

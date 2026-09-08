@@ -173,3 +173,28 @@ functions:
     path: ./ai/trends.ts:commandAnalyzeTrends
     command:
       name: "Chess: Phân tích xu hướng"
+  chessAiSuggestTags:
+    path: ./ai/tagging.ts:suggestTags
+    syscall:
+      name: chess.ai.suggestTags
+      description: >-
+        Gợi ý tối đa 4 tag + 1 câu tóm tắt cho một ván, dựa trên metadata và vài
+        nước mở đầu (không toàn bộ PGN). Trả lời sai định dạng bị coi là lỗi,
+        không tự đoán mò.
+      parameters:
+        - { name: input, type: object }
+      returns:
+        - { type: object }
+  chessApplyTagSuggestion:
+    path: ./ai/tagging.ts:applyTagSuggestion
+    syscall:
+      name: chess.applyTagSuggestion
+      description: >-
+        Ghi tag gợi ý (gộp, không xoá tag cũ) + tóm tắt (frontmatter `chessSummary`)
+        vào ghi chú. Chỉ gọi khi người dùng đã bấm "Áp dụng" trên gợi ý AI.
+      parameters:
+        - { name: pageName, type: string }
+        - { name: tags, type: array }
+        - { name: summary, type: string }
+      returns:
+        - { type: object }
