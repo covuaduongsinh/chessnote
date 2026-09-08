@@ -1371,7 +1371,9 @@ function parseString(s: string): string {
   if (delimiterMatch) {
     let text = delimiterMatch[2];
     // According to Lua semantics, whenever a [[ formatted string starts with a newline, that newline should be skipped
-    if (text[0] === "\n") {
+    if (text.startsWith("\r\n")) {
+      text = text.slice(2);
+    } else if (text.startsWith("\n")) {
       text = text.slice(1);
     }
     return text;

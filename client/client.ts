@@ -428,10 +428,16 @@ export class Client {
       "editor",
     );
 
-    // If local IndexedDB storage has no files, seed default base files & plugs
+    // If local IndexedDB storage has no files or corrupted index, seed default base files & plugs
     const localStore = new DataStoreSpacePrimitives(this.ds.kv);
     const existingFiles = await localStore.fetchFileList();
-    if (existingFiles.length === 0) {
+    const indexFile = await localStore.readFile("INDEX.md").catch(() => null);
+    const indexText = indexFile ? new TextDecoder().decode(indexFile.data) : "";
+    const isCorruptedIndex =
+      indexText.startsWith("<!doctype html>") ||
+      indexText.startsWith("<!DOCTYPE html>");
+
+    if (existingFiles.length === 0 || isCorruptedIndex) {
       console.log("Seeding initial offline space from base_fs.json...");
       try {
         const resp = await fetch(
@@ -468,11 +474,16 @@ export class Client {
       }
     }
 
-    const isCapacitor =
+    const isStandalone =
       typeof (window as any).Capacitor !== "undefined" ||
-      !!(window as any).silverbullet?.offlineOnly;
+      typeof (window as any).__TAURI__ !== "undefined" ||
+      typeof (window as any).__TAURI_INTERNALS__ !== "undefined" ||
+      typeof (window as any).__TAURI_METADATA__ !== "undefined" ||
+      !!(window as any).silverbullet?.offlineOnly ||
+      location.protocol === "tauri:" ||
+      location.hostname === "tauri.localhost";
 
-    const underlyingPrimitives = isCapacitor
+    const underlyingPrimitives = isStandalone
       ? localStore
       : this.httpSpacePrimitives;
 

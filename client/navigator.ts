@@ -208,11 +208,12 @@ export class PathPageNavigator {
 }
 
 export function parseRefFromURI(): Ref | null {
-  const locationRef = parseToRef(
-    decodeURIComponent(
-      location.href.substring(document.baseURI.length), //this essentially returns location with prefix and leading slash removed (equivalent to location.pathname.substring(prefix.length).substring(1)),
-    ),
-  );
+  const rawPath = location.href.substring(document.baseURI.length);
+  const cleanPath = rawPath.split("?")[0].split("#")[0];
+  if (!cleanPath || cleanPath === "index.html" || cleanPath === "index") {
+    return null;
+  }
+  const locationRef = parseToRef(decodeURIComponent(cleanPath));
 
   if (locationRef && location.hash) {
     locationRef.details = {

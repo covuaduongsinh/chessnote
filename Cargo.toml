@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["server-common", "server", "server-runtime-chrome", "server-merge", "bin/silverbullet", "bin/sb"]
+exclude = ["desktop/src-tauri"]
 # Make bare `cargo run` / `cargo build` target the silverbullet server binary.
 # CI's quality gates (clippy/test) pass `--workspace` explicitly, so they still
 # cover every member regardless of this default.

@@ -173,8 +173,11 @@ async function copyAssets(dist: string) {
   // `npm run mobile:build` (which passes the flag) gets the baked
   // standalone one. A flag (not an env var) so the same npm script works
   // identically whether npm's script-shell is cmd.exe, PowerShell, or bash.
-  const isMobileBuild = process.argv.includes("--mobile");
-  if (isMobileBuild) {
+  const isStandaloneBuild =
+    process.argv.includes("--mobile") ||
+    process.argv.includes("--desktop") ||
+    process.argv.includes("--standalone");
+  if (isStandaloneBuild) {
     // Generate manifest.json
     const manifest = {
       name: "ChessNote",
@@ -289,7 +292,10 @@ themes: Sacrifice, Attacking King
       "{{ description }}",
       "ChessNote - Chess Knowledge & Study Base",
     );
-    indexHtml = indexHtml.replaceAll("{{ additional_head_html | safe }}", "");
+    indexHtml = indexHtml.replaceAll(
+      "{{ additional_head_html | safe }}",
+      "<script>globalThis.silverbullet = { offlineOnly: true };</script>",
+    );
     indexHtml = indexHtml.replaceAll("{{ content | safe }}", "");
     indexHtml = indexHtml.replaceAll(".client/", "");
     await writeFile(`${dist}/index.html`, indexHtml, "utf-8");

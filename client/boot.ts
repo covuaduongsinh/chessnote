@@ -411,6 +411,15 @@ async function cachedFetch(path: string): Promise<string> {
       throw notAuthenticatedError;
     }
     const text = await response.text();
+    // In standalone / custom-protocol environments (Tauri/Capacitor), requests to non-existent
+    // files may receive index.html (SPA fallback) with 200 OK. Treat HTML response as empty.
+    if (
+      !path.endsWith(".html") &&
+      (text.startsWith("<!doctype html>") || text.startsWith("<!DOCTYPE html>"))
+    ) {
+      localStorage.setItem(cacheKey, "");
+      return "";
+    }
     // Persist to localStorage
     localStorage.setItem(cacheKey, text);
     return text;
