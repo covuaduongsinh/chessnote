@@ -1,4 +1,6 @@
 name: sync
+requiredPermissions:
+  - fetch
 functions:
   # Commands
   syncSpaceCommand:
@@ -33,3 +35,31 @@ functions:
     path: "./sync.ts:updateSyncStatus"
     events:
       - "service-worker:sync-status"
+
+  # Dropbox Sync (Giai đoạn 4)
+  dropboxInit:
+    path: "./dropbox_bridge.ts:initDropboxConfig"
+    events:
+      - editor:init
+  dropboxLoginCommand:
+    path: "./dropbox_bridge.ts:commandDropboxLogin"
+    command:
+      name: "Chess: Đăng nhập Dropbox"
+      menu:
+        location: space
+        group: "1_sync"
+        order: 3
+        label: "Đăng nhập Dropbox"
+  dropboxSyncCommand:
+    path: "./dropbox_bridge.ts:commandDropboxSync"
+    command:
+      name: "Chess: Đồng bộ Dropbox"
+      menu:
+        location: space
+        group: "1_sync"
+        order: 4
+        label: "Đồng bộ Dropbox"
+  dropboxLogoutCommand:
+    path: "./dropbox_bridge.ts:commandDropboxLogout"
+    command:
+      name: "Chess: Đăng xuất Dropbox"
