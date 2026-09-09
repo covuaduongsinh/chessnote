@@ -504,4 +504,34 @@ html, body {
   align-items: center;
   gap: 8px;
 }
+
+.chess-related-games {
+  margin-top: 4px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.chess-related-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+
+.chess-related-item {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+.chess-related-item a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.chess-related-reason {
+  font-size: 11px;
+  color: var(--text-muted);
+}
 `;

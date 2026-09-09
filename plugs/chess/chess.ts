@@ -1,6 +1,9 @@
 import { Chess } from "chess.js";
+import { index } from "@silverbulletmd/silverbullet/syscalls";
 import { CHESS_CSS, PIECE_SVGS } from "./board_renderer.ts";
 import { buildMoveList } from "./engine/game_reviewer.ts";
+import type { ChessGameFields } from "./index.ts";
+import { findRelatedGames, type RelatedGameMatch } from "./related_games.ts";
 
 function escapeHtml(str: string): string {
   return str
@@ -607,8 +610,30 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   // when the user clicks "Game Review" (see the widget script below).
   const moveList = buildMoveList(bodyText.trim());
 
+  // Related games (Giai đoạn D): thuần rule-based trên chess-game Object Index
+  // (cùng ECO, cùng người chơi) — rẻ, không AI/engine, nên tính luôn ở đây thay
+  // vì phải chờ người dùng bấm nút. Không chặn render bàn cờ nếu Object Index
+  // chưa sẵn sàng hoặc lỗi tạm thời (vd. đang trong lần index đầu tiên).
+  let relatedGames: RelatedGameMatch[] = [];
+  try {
+    const allGames = await index.queryLuaObjects<ChessGameFields>("chess-game", {});
+    relatedGames = findRelatedGames({ page: pageName, white, black, eco }, allGames);
+  } catch {
+    relatedGames = [];
+  }
+
   const initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w KQkq - 0 1";
   const widgetId = `chess_pgn_${Math.random().toString(36).substring(2, 9)}`;
+
+  const relatedGamesHtml = relatedGames.length === 0 ? "" : `
+      <div class="chess-related-games">
+        <div class="chess-related-title">🔗 Ván liên quan</div>
+        ${relatedGames.map((g) => `
+        <div class="chess-related-item">
+          <a href="/${encodeURIComponent(g.page)}" target="_top">${escapeHtml(g.white)} vs ${escapeHtml(g.black)} (${escapeHtml(g.result)})</a>
+          <span class="chess-related-reason">${escapeHtml(g.reasons.join(", "))}</span>
+        </div>`).join("")}
+      </div>`;
 
   const html = `
 <style>${CHESS_CSS}</style>
@@ -666,6 +691,7 @@ export async function pgnWidget(bodyText: string, pageName: string) {
       <div class="fen-footer">
         <span id="${widgetId}_fen_text">${escapeHtml(initialFen)}</span>
       </div>
+      ${relatedGamesHtml}
     </div>
   </div>
 </div>
