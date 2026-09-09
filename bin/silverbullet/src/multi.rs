@@ -81,7 +81,7 @@ pub async fn build_multi_stack(
     let session = SessionPolicy::from_env();
 
     let metrics = config.metrics_port.map(|_| Arc::new(Metrics::new()));
-    let (runtime, runtime_availability) = space_runtime_factory(&root);
+    let (runtime, runtime_availability, pdf_renderer) = space_runtime_factory(&root);
     let deps = InstanceDeps {
         root: root.clone(),
         assets: AssetFactories {
@@ -89,6 +89,7 @@ pub async fn build_multi_stack(
             base_fs: Box::new(|| Box::new(EmbeddedSpace::<BaseFsAssets>::new())),
         },
         runtime,
+        pdf_renderer,
         metrics: metrics.clone(),
         auth: InstanceAuth::Accounts {
             users: store.clone(),
@@ -201,14 +202,21 @@ pub(crate) async fn run_multi(
 }
 
 /// Build the runtime factory for a server rooted at `server_root`, plus the
-/// availability the Space Manager reports to administrators.
+/// availability the Space Manager reports to administrators, plus a shared PDF
+/// renderer for `/.export/pdf`.
 ///
-/// One `ChromePool` — one Chrome process — serves every space; each space gets
-/// its own page, log buffer, and auth cookie. The pool is created eagerly but
-/// launches nothing until some space's runtime API is first used.
+/// One `ChromePool` — one Chrome process — serves every space (for the Lua
+/// runtime API) and every space's PDF export alike; each space's runtime gets
+/// its own page, log buffer, and auth cookie, while PDF export opens its own
+/// throwaway page per request. The pool is created eagerly but launches
+/// nothing until first used.
 pub(crate) fn space_runtime_factory(
     server_root: &std::path::Path,
-) -> (RuntimeFactory, RuntimeAvailability) {
+) -> (
+    RuntimeFactory,
+    RuntimeAvailability,
+    Option<Arc<dyn silverbullet_server::pdf::PdfRenderer>>,
+) {
     use silverbullet_server_runtime_chrome::RuntimeUnavailable;
 
     let (pool, availability) =
@@ -234,6 +242,9 @@ pub(crate) fn space_runtime_factory(
                 (None, RuntimeAvailability::NoChrome)
             }
         };
+    let pdf_renderer: Option<Arc<dyn silverbullet_server::pdf::PdfRenderer>> = pool
+        .clone()
+        .map(|pool| Arc::new(ChromePoolPdfRenderer(pool)) as Arc<dyn silverbullet_server::pdf::PdfRenderer>);
     let factory: RuntimeFactory = Box::new(move |req: &RuntimeRequest| {
         let pool = pool.as_ref()?;
         if req.read_only {
@@ -250,7 +261,24 @@ pub(crate) fn space_runtime_factory(
             transport, logs,
         )))
     });
-    (factory, availability)
+    (factory, availability, pdf_renderer)
+}
+
+/// Adapts the shared `ChromePool` (same browser process the Lua runtime API
+/// may be using) to `PdfRenderer`, so `/.export/pdf` can render arbitrary
+/// self-contained HTML without depending on any one space's page/cookie.
+struct ChromePoolPdfRenderer(Arc<silverbullet_server_runtime_chrome::ChromePool>);
+
+impl silverbullet_server::pdf::PdfRenderer for ChromePoolPdfRenderer {
+    fn render_pdf(
+        &self,
+        html: String,
+        timeout: std::time::Duration,
+    ) -> Result<Vec<u8>, silverbullet_server::runtime::RuntimeError> {
+        self.0
+            .print_to_pdf(html, timeout)
+            .map_err(silverbullet_server::runtime::RuntimeError::Transport)
+    }
 }
 
 #[cfg(unix)]

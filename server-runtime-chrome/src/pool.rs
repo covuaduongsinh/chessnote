@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use chromiumoxide::browser::Browser;
+use chromiumoxide::cdp::browser_protocol::page::PrintToPdfParams;
 use chromiumoxide::page::Page;
 use serde_json::Value;
 use silverbullet_server::runtime::{ClientTransport, LogBuffer, RuntimeError};
@@ -218,6 +219,63 @@ impl ChromePool {
         *self.browser.lock().await = Some((generation, browser.clone()));
         Ok((generation, browser))
     }
+
+    /// Render a self-contained HTML string (no external resources — the caller
+    /// must inline everything it wants printed) to PDF bytes, in a fresh,
+    /// throwaway page of the shared browser. Blocking: runs on the pool's own
+    /// tokio runtime, so call this from a `spawn_blocking` context, exactly
+    /// like `SharedChromeTransport::eval_js`.
+    ///
+    /// Unlike a space's page (see `supervisor::launch_page`), this page is not
+    /// registered anywhere and outlives nothing but this call: closing it best-
+    /// effort on every path (success or failure) is enough. There is no
+    /// supervisor to restart it and no `PageCloseGuard` cancellation-safety
+    /// requirement — a client disconnect aborting this future is the one case
+    /// that can leak a tab, accepted for a first version of this endpoint.
+    pub fn print_to_pdf(self: &Arc<Self>, html: String, timeout: Duration) -> Result<Vec<u8>, String> {
+        let pool = self.clone();
+        self.rt().block_on(async move {
+            let attempt = async {
+                let (_, browser) = pool.ensure_browser().await?;
+                let page = browser
+                    .new_page("about:blank")
+                    .await
+                    .map_err(|e| format!("new page: {e}"))?;
+                let result = render_html_to_pdf(&page, &html).await;
+                let _ = page.close().await;
+                result
+            };
+            match tokio::time::timeout(timeout, attempt).await {
+                Err(_) => Err(format!("pdf render timed out after {}s", timeout.as_secs())),
+                Ok(r) => r,
+            }
+        })
+    }
+}
+
+/// A4, with margins that leave room for the footer's page-number line.
+async fn render_html_to_pdf(page: &Page, html: &str) -> Result<Vec<u8>, String> {
+    page.set_content(html)
+        .await
+        .map_err(|e| format!("set content: {e}"))?;
+    let params = PrintToPdfParams::builder()
+        .print_background(true)
+        .display_header_footer(true)
+        .header_template("<span></span>")
+        .footer_template(
+            "<div style=\"width:100%;font-size:9px;text-align:center;\
+             color:#666;\">\
+             <span class=\"pageNumber\"></span> / <span class=\"totalPages\"></span>\
+             </div>",
+        )
+        .paper_width(8.27)
+        .paper_height(11.69)
+        .margin_top(0.4)
+        .margin_bottom(0.6)
+        .margin_left(0.4)
+        .margin_right(0.4)
+        .build();
+    page.pdf(params).await.map_err(|e| format!("print to pdf: {e}"))
 }
 
 impl<B> Drop for ChromePool<B> {

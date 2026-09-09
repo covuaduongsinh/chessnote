@@ -189,6 +189,20 @@ functions:
     path: ./ai/qa.ts:commandAskAi
     command:
       name: "Chess: Hỏi AI"
+  chessRenderPageForPdf:
+    path: ./pdf_export.ts:renderPageForPdf
+    syscall:
+      name: chess.renderPageForPdf
+      description: >-
+        Dựng lại toàn bộ nội dung trang thành 1 HTML tĩnh sẵn sàng để in PDF:
+        thay mỗi khối fen/pgn/puzzle bằng ảnh bàn cờ tĩnh (không cần iframe),
+        phần còn lại render bằng markdown.markdownToHtml. boardSize (px, mặc
+        định 400, kẹp trong khoảng 150-700) chỉnh độ rộng mỗi bàn cờ.
+      parameters:
+        - { name: text, type: string }
+        - { name: boardSize, type: number }
+      returns:
+        - { type: string }
   chessApplyTagSuggestion:
     path: ./ai/tagging.ts:applyTagSuggestion
     syscall:

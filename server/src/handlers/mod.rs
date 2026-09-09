@@ -3,6 +3,7 @@ pub mod auth;
 pub mod bundle;
 pub mod control;
 pub mod events;
+pub mod export;
 pub mod fs;
 pub mod oauth;
 pub mod proxy;

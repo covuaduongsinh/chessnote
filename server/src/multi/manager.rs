@@ -431,6 +431,7 @@ mod tests {
                 base_fs: Box::new(|| Box::new(MemorySpacePrimitives::new())),
             },
             runtime: Box::new(|_| None),
+            pdf_renderer: None,
             metrics: None,
             auth: InstanceAuth::Single(Some(
                 crate::auth::AuthConfig::try_parse(Some("admin:pw"), None, None, None, None)

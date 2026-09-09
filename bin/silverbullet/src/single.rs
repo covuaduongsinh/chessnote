@@ -119,6 +119,10 @@ pub(crate) async fn run_single(
     let auth = silverbullet_server::auth::AuthConfig::from_env().map_err(|e| e.0)?;
 
     let metrics = config.metrics_port.map(|_| Arc::new(Metrics::new()));
+    // One call: `space_runtime_factory` creates the shared `ChromePool` (one
+    // Chrome process) internally, so calling it twice would launch two.
+    let (runtime, _runtime_availability, pdf_renderer) =
+        crate::multi::space_runtime_factory(&root);
 
     let deps = InstanceDeps {
         root: root.clone(),
@@ -126,7 +130,8 @@ pub(crate) async fn run_single(
             client_bundle: Box::new(|| Box::new(EmbeddedSpace::<ClientAssets>::new())),
             base_fs: Box::new(|| Box::new(EmbeddedSpace::<BaseFsAssets>::new())),
         },
-        runtime: crate::multi::space_runtime_factory(&root).0,
+        runtime,
+        pdf_renderer,
         metrics: metrics.clone(),
         auth: InstanceAuth::Single(auth),
         version: crate::VERSION.to_string(),

@@ -187,6 +187,10 @@ export function downloadFile(filename: string, dataUrl: string): Promise<void> {
   return syscall("editor.downloadFile", filename, dataUrl);
 }
 
+export function exportPdf(html: string, filename: string): Promise<void> {
+  return syscall("editor.exportPdf", html, filename);
+}
+
 export function uploadFile(
   accept?: string,
   capture?: string,

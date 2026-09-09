@@ -82,3 +82,60 @@ service.define {
   end
 }
 ```
+
+# PDF exporter
+Renders the page to a print-ready PDF: chess boards (`fen`/`pgn`/`puzzle` blocks) as static images instead of the live interactive iframe (with no raw FEN text printed underneath — the board already shows the position), and automatic page numbers. Default column layout is 2 columns and default board size is 400px (both configurable via `pdfExport.columns`/`pdfExport.boardSize` in `CONFIG.md` or the Configuration Manager). `column-fill: auto` keeps the first column filled to the page's actual full height before spilling into the second, so a board (`break-inside: avoid`, see `plugs/chess/pdf_export.ts`) that has real room left in the current column stays there instead of jumping over and leaving that room blank; only when the board genuinely doesn't fit what's left of the column does it still move to the next one (or, for a particularly board-heavy page, 1 column and/or a smaller board size reads better and also saves paper when printing). Add `pdfColumns: 1|2` and/or `pdfBoardSize: <px>` to a page's frontmatter to override either default for that one page. The board rendering lives in the `chess` plug (`chess.renderPageForPdf`, see `plugs/chess/pdf_export.ts`) since it needs `chess.js`; the actual PDF rendering (headless Chrome — the server's `/.export/pdf`, or the desktop app's own `export_pdf` Tauri command) lives behind `editor.exportPdf`, which also picks whichever of those two the current environment has.
+
+```space-lua
+-- priority: 10
+config.defineCategory {
+  name = "Export",
+  description = "Tuỳ chọn khi xuất trang, ví dụ xuất PDF.",
+  priority = 20,
+}
+
+config.define("pdfExport", {
+  type = "object",
+  properties = {
+    columns = {
+      type = "number",
+      default = 2,
+      description = "Số cột mặc định khi xuất PDF. Ghi đè cho một trang cụ thể bằng frontmatter `pdfColumns`.",
+      ui = { category = "Export", label = "Số cột PDF mặc định", priority = 1 },
+    },
+    boardSize = {
+      type = "number",
+      default = 400,
+      minimum = 150,
+      maximum = 700,
+      description = "Kích thước (px) bàn cờ khi xuất PDF, để giảm bớt nếu muốn tiết kiệm giấy in. Ghi đè cho một trang cụ thể bằng frontmatter `pdfBoardSize`.",
+      ui = { category = "Export", label = "Kích thước bàn cờ khi xuất PDF (px)", priority = 2 },
+    },
+  }
+})
+
+service.define {
+  selector = "export",
+  match = {
+    name = "PDF: Xuất file PDF",
+    description = "Xuất trang hiện tại ra PDF (mặc định 2 cột & bàn cờ 400px, chỉnh trong CONFIG.md hoặc Configuration Manager; ghi đè theo từng trang bằng frontmatter pdfColumns/pdfBoardSize, bàn cờ dạng ảnh tĩnh, đánh số trang tự động)"
+  },
+  run = function(data)
+    local defaultBoardSize = config.get("pdfExport.boardSize", 400)
+    local boardSize = data.pageMeta.pdfBoardSize or defaultBoardSize
+    local boardHtml = chess.renderPageForPdf(data.text, boardSize)
+    local defaultColumns = config.get("pdfExport.columns", 2)
+    local columns = data.pageMeta.pdfColumns or defaultColumns
+    local columnCss = columns == 1 and "column-count:1;" or "column-count:2;column-gap:24px;"
+    local pageName = data.pageMeta.name or "export"
+    local safeName = string.gsub(pageName, "/", "_")
+    local fullHtml = "<!doctype html><html><head><meta charset=\"utf-8\">" ..
+      "<style>" ..
+      "body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#111;margin:0;padding:0 12px;column-fill:auto;" .. columnCss .. "}" ..
+      "h1,h2,h3{break-after:avoid;}" ..
+      "p{orphans:3;widows:3;}" ..
+      "</style></head><body>" .. boardHtml .. "</body></html>"
+    editor.exportPdf(fullHtml, safeName .. ".pdf")
+  end
+}
+```

@@ -363,6 +363,7 @@ mod tests {
                 base_fs: Box::new(|| Box::new(MemorySpacePrimitives::new())),
             },
             runtime: Box::new(|_| None),
+            pdf_renderer: None,
             metrics: None,
             auth: InstanceAuth::Accounts {
                 users: users.clone(),

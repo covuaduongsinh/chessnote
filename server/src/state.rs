@@ -120,6 +120,10 @@ pub struct ServerState {
     pub metrics: Option<Arc<Metrics>>,
     /// Lua runtime backend for `/.runtime/*`. May be disabled, when None: those endpoints 503.
     pub runtime: Option<Arc<dyn RuntimeBackend>>,
+    /// PDF renderer for `/.export/pdf` (headless Chrome, shared with `runtime`
+    /// where both are backed by the same browser process). `None` disables the
+    /// endpoint (503), e.g. when no Chrome/Chromium is available.
+    pub pdf_renderer: Option<Arc<dyn crate::pdf::PdfRenderer>>,
     /// Broadcast channel of file-system change events, backing `GET /.events`.
     /// `None` (non-disk backend or watcher unavailable) -> the endpoint 404s
     /// and clients fall back to polling.

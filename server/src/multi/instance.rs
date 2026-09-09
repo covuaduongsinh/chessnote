@@ -48,6 +48,9 @@ pub struct InstanceDeps {
     pub root: PathBuf,
     pub assets: AssetFactories,
     pub runtime: RuntimeFactory,
+    /// Shared PDF renderer for every space's `/.export/pdf` (same browser
+    /// process the runtime factory above may be using). `None` disables it.
+    pub pdf_renderer: Option<Arc<dyn crate::pdf::PdfRenderer>>,
     pub metrics: Option<Arc<crate::metrics::Metrics>>,
     /// Authentication source for every instance built by this manager.
     pub auth: InstanceAuth,
@@ -566,6 +569,7 @@ fn try_build_state(
         },
         metrics: deps.metrics.clone(),
         runtime,
+        pdf_renderer: deps.pdf_renderer.clone(),
         fs_events,
         shutdown: deps.shutdown.clone(),
         fs_guard,
@@ -594,6 +598,7 @@ mod tests {
                 base_fs: Box::new(|| Box::new(MemorySpacePrimitives::new())),
             },
             runtime: Box::new(|_req| None),
+            pdf_renderer: None,
             metrics: None,
             auth: InstanceAuth::Single(Some(
                 crate::auth::AuthConfig::try_parse(Some("admin:pw"), None, None, None, None)

@@ -1,3 +1,83 @@
+import { Chess } from "chess.js";
+
+function escapeHtmlForBoard(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+/**
+ * A fully static rendering of a FEN position: every square/piece is baked
+ * directly into the returned HTML string (via chess.js's `board()` + the
+ * `PIECE_SVGS` below), unlike `fenWidget`'s interactive board — which is a
+ * shell plus a `<script>` that draws the squares client-side in a live
+ * iframe. Needed for PDF export (see `pdf_export.ts`): a headless print pass
+ * only gets one static snapshot of the DOM, with no interactivity and no
+ * onload script expected to run first.
+ *
+ * Sized to fill its container (`width/height: 100%` on `.chess-board`, from
+ * `CHESS_CSS`) rather than the widget's fixed 360px — the caller wraps it in
+ * whatever fixed-width box the print layout needs (see
+ * `.chessnote-static-board-wrapper` in `pdf_export.ts`).
+ */
+export function renderStaticBoardHtml(
+  fen: string,
+  opts: { orientation?: "white" | "black"; title?: string; showFen?: boolean } = {},
+): string {
+  const orientation = opts.orientation === "black" ? "black" : "white";
+  let boardRows: ReturnType<Chess["board"]>;
+  try {
+    boardRows = new Chess(fen).board();
+  } catch (e) {
+    return `<div class="chess-error-banner">FEN không hợp lệ: ${
+      escapeHtmlForBoard(fen)
+    } (${e instanceof Error ? escapeHtmlForBoard(e.message) : ""})</div>`;
+  }
+
+  let squares = "";
+  for (let displayRow = 0; displayRow < 8; displayRow++) {
+    for (let displayCol = 0; displayCol < 8; displayCol++) {
+      // Map display position back to the absolute board square so the
+      // light/dark pattern and file/rank labels stay correct under either
+      // orientation — only *where* each square is drawn flips, not what it is.
+      const row = orientation === "white" ? displayRow : 7 - displayRow;
+      const col = orientation === "white" ? displayCol : 7 - displayCol;
+      const rankNum = 8 - row; // row 0 = rank 8 (chess.js's board() convention)
+      const fileLetter = String.fromCharCode(97 + col); // col 0 = file a
+      const isLight = (col + (rankNum - 1)) % 2 === 1;
+      const piece = boardRows[row][col];
+      const pieceHtml = piece
+        ? `<div class="chess-piece">${
+          PIECE_SVGS[`${piece.color}${piece.type.toUpperCase()}`] ?? ""
+        }</div>`
+        : "";
+      const rankLabel = displayCol === 0
+        ? `<span class="chess-coord coord-rank">${rankNum}</span>`
+        : "";
+      const fileLabel = displayRow === 7
+        ? `<span class="chess-coord coord-file">${fileLetter}</span>`
+        : "";
+      squares += `<div class="chess-sq ${isLight ? "light" : "dark"}">${rankLabel}${fileLabel}${pieceHtml}</div>`;
+    }
+  }
+
+  const titleHtml = opts.title
+    ? `<div class="chess-title">${escapeHtmlForBoard(opts.title)}</div>`
+    : "";
+  const fenFooterHtml = opts.showFen === false
+    ? ""
+    : `<div class="fen-footer"><span>${escapeHtmlForBoard(fen)}</span></div>`;
+  return `
+<div class="chessnote-static-board">
+  ${titleHtml}
+  <div class="chess-board">${squares}</div>
+  ${fenFooterHtml}
+</div>`;
+}
+
 // SVG Chess Pieces (Staunton vector style - CC0 / Public Domain / MIT compliant)
 export const PIECE_SVGS: Record<string, string> = {
   wK: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 45 45" width="100%" height="100%"><g fill="none" fill-rule="evenodd" stroke="#000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22.5 11.63V6M20 8h5" stroke-linejoin="miter"/><path d="M22.5 25s4.5-7.5 3-10.5c0-1.7-1.3-3-3-3s-3 1.3-3 3c-1.5 3 3 10.5 3 10.5" fill="#fff"/><path d="M11.5 37c5.5 3.5 15.5 3.5 21 0v-7s9-4.5 6-10.5c-4-6.5-13.5-3.5-16 4V23v-2c-2.5-7.5-12-10.5-16-4-3 6 6 10.5 6 10.5v7z" fill="#fff"/><path d="M11.5 30c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0m-21 3.5c5.5-3 15.5-3 21 0"/></g></svg>`,

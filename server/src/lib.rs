@@ -10,6 +10,7 @@ pub mod handlers;
 pub mod link_resolve;
 pub mod metrics;
 pub mod multi;
+pub mod pdf;
 pub mod revisions;
 pub mod router;
 pub mod runtime;
@@ -67,6 +68,7 @@ mod test_support {
             },
             metrics: None,
             runtime: None,
+            pdf_renderer: None,
             fs_events: None,
             shutdown: None,
             fs_guard: Default::default(),

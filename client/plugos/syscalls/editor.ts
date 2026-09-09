@@ -465,6 +465,68 @@ export function editorSyscalls(client: Client): SysCallMapping {
         },
       ],
     },
+    "editor.exportPdf": {
+      callback: async (_ctx, html: string, filename: string): Promise<void> => {
+        let bytes: Uint8Array;
+        // Desktop (Tauri) has no server behind it, so PDF rendering runs
+        // in-process via the `export_pdf` Tauri command instead of a fetch —
+        // same underlying `ChromePool::print_to_pdf`, just invoked natively.
+        // `__TAURI_INTERNALS__` (not the `window.__TAURI__` convenience
+        // global, which needs `withGlobalTauri` — unset here) is always
+        // injected into a Tauri webview, matching the detection `client.ts`
+        // already uses to tell a standalone build from a browser session.
+        const tauri = (globalThis as any).__TAURI_INTERNALS__;
+        if (typeof tauri !== "undefined") {
+          const raw: number[] = await tauri.invoke("export_pdf", { html });
+          bytes = new Uint8Array(raw);
+        } else {
+          const url = `${document.baseURI.replace(/\/*$/, "")}/.export/pdf`;
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ html }),
+          });
+          if (!response.ok) {
+            const body = await response.text().catch(() => "");
+            throw new Error(
+              `PDF export failed (${response.status}): ${body || response.statusText}`,
+            );
+          }
+          bytes = new Uint8Array(await response.arrayBuffer());
+        }
+        const blobUrl = URL.createObjectURL(
+          new Blob([bytes as any], { type: "application/pdf" }),
+        );
+        try {
+          const link = document.createElement("a");
+          link.href = blobUrl;
+          link.download = filename;
+          link.click();
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
+      },
+      description:
+        "Renders self-contained HTML to PDF (via the server on web, or the desktop app's own headless Chrome on Tauri) and triggers a browser download of the result.",
+      parameters: [
+        {
+          name: "html",
+          type: "string",
+          description:
+            "Self-contained HTML to render — no external resources; inline everything (CSS, images).",
+        },
+        {
+          name: "filename",
+          type: "string",
+          description: "The downloaded filename.",
+        },
+      ],
+      examples: [
+        {
+          code: 'editor.exportPdf("<html><body>Hello</body></html>", "note.pdf")',
+        },
+      ],
+    },
     "editor.uploadFile": {
       callback: (
         _ctx,

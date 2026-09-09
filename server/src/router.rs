@@ -49,6 +49,7 @@ pub(crate) fn required_level(method: &Method, path: &str) -> AccessLevel {
         || path.starts_with("/.proxy/")
         || path.starts_with("/.runtime/")
         || path.starts_with("/.revisions")
+        || path.starts_with("/.export/")
     {
         return AccessLevel::Write;
     }
@@ -266,6 +267,10 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route(
             "/.runtime/logs",
             get(crate::handlers::runtime::handle_runtime_logs),
+        )
+        .route(
+            "/.export/pdf",
+            post(crate::handlers::export::handle_export_pdf),
         )
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -673,6 +678,7 @@ mod auth_tests {
             ("POST", "/.runtime/lua"),
             ("POST", "/.runtime/lua_script"),
             ("GET", "/.runtime/logs"),
+            ("POST", "/.export/pdf"),
         ] {
             let status = crate::build_router(st.clone())
                 .oneshot(
@@ -691,7 +697,12 @@ mod auth_tests {
 
     #[test]
     fn capability_routes_require_write() {
-        for path in ["/.shell", "/.proxy/https://example.com", "/.runtime/lua"] {
+        for path in [
+            "/.shell",
+            "/.proxy/https://example.com",
+            "/.runtime/lua",
+            "/.export/pdf",
+        ] {
             assert_eq!(
                 super::required_level(&Method::GET, path),
                 AccessLevel::Write,

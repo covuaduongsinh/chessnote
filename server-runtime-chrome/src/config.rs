@@ -135,11 +135,16 @@ impl SpacePage {
 }
 
 /// Find a Chrome/Chromium executable from platform-specific candidates.
+/// Microsoft Edge (Chromium-based, same CDP surface) is scanned too, after
+/// Chrome/Chromium — Edge ships by default on Windows, so a machine with no
+/// separately-installed Chrome still gets the runtime API and PDF export
+/// rather than being reported as having no browser at all.
 pub fn find_chrome() -> Option<String> {
     if cfg!(target_os = "macos") {
         let candidates: &[&str] = &[
             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
             "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
         ];
         return resolve_candidates(candidates);
     }
@@ -166,6 +171,11 @@ pub fn find_chrome() -> Option<String> {
                     .into_owned(),
             );
         }
+        candidates.push("msedge".to_string());
+        candidates.push("msedge.exe".to_string());
+        candidates
+            .push(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe".to_string());
+        candidates.push(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe".to_string());
         let refs: Vec<&str> = candidates.iter().map(String::as_str).collect();
         return resolve_candidates(&refs);
     }
@@ -179,6 +189,8 @@ pub fn find_chrome() -> Option<String> {
         "google-chrome-stable",
         "/usr/bin/google-chrome",
         "/snap/bin/chromium",
+        "microsoft-edge",
+        "microsoft-edge-stable",
     ];
     resolve_candidates(candidates)
 }
