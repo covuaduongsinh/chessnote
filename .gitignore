@@ -53,3 +53,7 @@ desktop/src-tauri/gen
 
 .omc
 my_space
+
+# ChessNote Cloud (Phase B) local dev storage — default data dir, never real
+# user data that should be committed.
+cloud-server/data

@@ -37,6 +37,7 @@
 | `plugs/chess/engine/` | TS / WASM | Động cơ Arasan WASM, UCI bridge, Game Reviewer |
 | `plugs/chess/ai/` | TypeScript | AI Bridge (gọi sang sidecar), Prompt templates, Trends, Tagging, QA RAG |
 | `ai-sidecar/` | TypeScript / Node | Tiến trình trung gian quản lý phiên Claude CLI / API Key |
+| `cloud-server/` | TypeScript / Node | ChessNote Cloud (Phase B, tuỳ chọn) — server WebDAV tự host + kênh WebSocket đẩy tín hiệu đồng bộ realtime |
 | `client/` | TypeScript (Preact) | Giao diện SilverBullet, CodeMirror 6, Space Lua VM |
 | `server/` | Rust | Máy chủ HTTP, Proxy router `/.proxy/`, Quản lý Space |
 | `desktop/` | Rust (Tauri) | Vỏ bọc ứng dụng máy tính Desktop |

@@ -4,6 +4,7 @@ import { version as publicVersion } from "../../../version.json";
 import type { CommandDef } from "@silverbulletmd/silverbullet/type/manifest";
 import type { SyscallMeta } from "@silverbulletmd/silverbullet/type/index";
 import { loadAccounts, loadProfile } from "../../accounts.ts";
+import { detectStandaloneEnv } from "../../spaces/platform.ts";
 import type {
   Account,
   ClientProfile,
@@ -256,6 +257,11 @@ export function systemSyscalls(
       callback: (): boolean => typeof (globalThis as any).Capacitor !== "undefined",
       description:
         "Whether this client is running inside the Capacitor mobile app shell (Android/iOS), which has no backend server — anything needing one (PDF export, server-proxied AI features) should check this and degrade gracefully instead of failing on a network error.",
+    },
+    "system.hasServerProxy": {
+      callback: (): boolean => !detectStandaloneEnv(),
+      description:
+        "Whether a real Rust server is reachable behind this client to service the `/.proxy/` endpoint. False for the standalone Capacitor mobile app and the standalone Tauri desktop app (both static bundles with no server) — plugs needing a plain external fetch() should use the global `nativeFetch` in that case instead of relying on the proxy, similar to `isCapacitor()` but also covering standalone Desktop.",
     },
     "system.getProfile": {
       callback: (): Promise<ClientProfile> => loadProfile(client),

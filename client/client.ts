@@ -85,6 +85,7 @@ import {
 } from "./spaces/evented_space_primitives.ts";
 import type { IndexQueueBody } from "@silverbulletmd/silverbullet/type/datastore";
 import { HttpSpacePrimitives } from "./spaces/http_space_primitives.ts";
+import { detectStandaloneEnv } from "./spaces/platform.ts";
 import type { Command, PaletteCommand } from "./types/command.ts";
 import type {
   BootConfig,
@@ -389,6 +390,8 @@ export class Client {
       void this.dispatchAppEvent("cron:secondPassed");
     }, 1000);
 
+    this.registerActivityResumeListeners();
+
     this.loadCustomStyles().catch(console.error);
 
     await timedSpan("editor-init", () => this.dispatchAppEvent("editor:init"));
@@ -401,6 +404,40 @@ export class Client {
     });
 
     this.updatePageListCache().catch(console.error);
+  }
+
+  /**
+   * Dispatches `editor:activityResumed` whenever the app becomes active again
+   * after being backgrounded, for plugs (e.g. `plugs/sync/auto_trigger.ts`,
+   * Giai đoạn A.3 bước 3) to trigger work right when the user comes back
+   * instead of waiting for the next interval/debounce tick:
+   * - Web and Tauri Desktop: `visibilitychange`/`focus` — Tauri's webview is
+   *   a real browser context (WebView2/WKWebView), so these plain DOM events
+   *   already fire correctly there; no `@tauri-apps/api` needed.
+   * - Capacitor (Android/iOS): the Android WebView's own `visibilitychange`
+   *   is unreliable across OS versions when backgrounding/foregrounding the
+   *   app, so the native `@capacitor/app` `resume` lifecycle event is used
+   *   instead (same reasoning Super Productivity documents for its own
+   *   `IS_ANDROID_WEB_VIEW` branch). Dynamically imported and gated behind
+   *   the Capacitor global check so Web/Desktop builds never load it.
+   */
+  private registerActivityResumeListeners() {
+    const fire = () => void this.dispatchAppEvent("editor:activityResumed");
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") fire();
+    });
+    window.addEventListener("focus", fire);
+
+    if (typeof (window as any).Capacitor !== "undefined") {
+      import("@capacitor/app")
+        .then(({ App }) => {
+          App.addListener("resume", fire);
+        })
+        .catch((e) =>
+          console.warn("Could not register Capacitor App resume listener:", e),
+        );
+    }
   }
 
   async initSpace() {
@@ -474,14 +511,7 @@ export class Client {
       }
     }
 
-    const isStandalone =
-      typeof (window as any).Capacitor !== "undefined" ||
-      typeof (window as any).__TAURI__ !== "undefined" ||
-      typeof (window as any).__TAURI_INTERNALS__ !== "undefined" ||
-      typeof (window as any).__TAURI_METADATA__ !== "undefined" ||
-      !!(window as any).silverbullet?.offlineOnly ||
-      location.protocol === "tauri:" ||
-      location.hostname === "tauri.localhost";
+    const isStandalone = detectStandaloneEnv();
 
     const underlyingPrimitives = isStandalone
       ? localStore

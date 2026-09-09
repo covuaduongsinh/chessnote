@@ -89,6 +89,7 @@ export type AppEvent =
   | "editor:pageSaved"
   | "editor:pageCreating"
   | "editor:pageModified"
+  | "editor:activityResumed" // app came back to the foreground (tab/window focus, or Capacitor App "resume")
   | "editor:documentSaving"
   | "editor:documentSaved"
   | "editor:modeswitch"

@@ -63,3 +63,79 @@ functions:
     path: "./dropbox_bridge.ts:commandDropboxLogout"
     command:
       name: "Chess: Đăng xuất Dropbox"
+
+  # WebDAV Sync (Giai đoạn A — tổng quát hoá từ Dropbox)
+  webdavInit:
+    path: "./webdav_bridge.ts:initWebDavConfig"
+    events:
+      - editor:init
+  webdavLoginCommand:
+    path: "./webdav_bridge.ts:commandWebDavLogin"
+    command:
+      name: "Chess: Đăng nhập WebDAV"
+      menu:
+        location: space
+        group: "1_sync"
+        order: 5
+        label: "Đăng nhập WebDAV"
+  webdavSyncCommand:
+    path: "./webdav_bridge.ts:commandWebDavSync"
+    command:
+      name: "Chess: Đồng bộ WebDAV"
+      menu:
+        location: space
+        group: "1_sync"
+        order: 6
+        label: "Đồng bộ WebDAV"
+  webdavLogoutCommand:
+    path: "./webdav_bridge.ts:commandWebDavLogout"
+    command:
+      name: "Chess: Đăng xuất WebDAV"
+
+  # Auto-trigger (Giai đoạn A.3) — tự động chạy Dropbox/WebDAV sync theo interval
+  autoTriggerInit:
+    path: "./auto_trigger.ts:initAutoTrigger"
+    events:
+      - editor:init
+  autoTriggerOnPageSaved:
+    path: "./auto_trigger.ts:onPageSaved"
+    events:
+      - page:saved
+  autoTriggerOnActivityResumed:
+    path: "./auto_trigger.ts:runAllConfiguredSyncs"
+    events:
+      - editor:activityResumed
+  syncStatusCommand:
+    path: "./auto_trigger.ts:commandSyncStatus"
+    command:
+      name: "Chess: Trạng thái đồng bộ"
+      menu:
+        location: space
+        group: "1_sync"
+        order: 7
+        label: "Trạng thái đồng bộ"
+
+  # E2EE tuỳ chọn (Giai đoạn A.5) — dùng chung cho mọi provider
+  e2eeInit:
+    path: "./e2ee_bridge.ts:initE2eeConfig"
+    events:
+      - editor:init
+  e2eeUnlockCommand:
+    path: "./e2ee_bridge.ts:commandE2eeUnlock"
+    command:
+      name: "Chess: Mở khoá mã hoá đồng bộ"
+      menu:
+        location: space
+        group: "1_sync"
+        order: 8
+        label: "Mở khoá mã hoá đồng bộ (E2EE)"
+  e2eeLockCommand:
+    path: "./e2ee_bridge.ts:commandE2eeLock"
+    command:
+      name: "Chess: Khoá lại mã hoá đồng bộ"
+
+  # Push realtime của ChessNote Cloud (Phase B — xem cloud-server/)
+  pushTriggerInit:
+    path: "./push_trigger.ts:initPushTrigger"
+    events:
+      - editor:init

@@ -84,7 +84,13 @@ export async function exchangeCodeForTokens(
     client_id: appKey,
     code_verifier: codeVerifier,
   });
-  const res = await fetch(TOKEN_URL, {
+  // dropboxapi.com là domain public, không cần/không nên đi qua proxy `/.proxy/`
+  // của server Rust — server đó có thể không tồn tại trên Desktop/Mobile
+  // (bundle tĩnh, không server). `nativeFetch` là bản fetch() gốc chưa bị
+  // worker_runtime.ts monkey-patch. KHÔNG mở quyền mới: `sync.plug.yaml` đã
+  // có `requiredPermissions: [fetch]` ở cấp plug, người dùng đã đồng ý cho
+  // plug này gọi mạng — đây chỉ đổi cơ chế thực thi, không đổi ranh giới quyền.
+  const res = await nativeFetch(TOKEN_URL, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -114,7 +120,8 @@ export async function refreshAccessToken(
     refresh_token: refreshToken,
     client_id: appKey,
   });
-  const res = await fetch(TOKEN_URL, {
+  // Xem comment ở exchangeCodeForTokens() — nativeFetch để bỏ qua proxy `/.proxy/`.
+  const res = await nativeFetch(TOKEN_URL, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -157,7 +164,8 @@ async function apiFetch(
   attempt = 0,
 ): Promise<Response> {
   const tokens = await ensureFreshTokens(deps);
-  const res = await fetch(url, {
+  // Xem comment ở exchangeCodeForTokens() — nativeFetch để bỏ qua proxy `/.proxy/`.
+  const res = await nativeFetch(url, {
     method: "POST",
     ...init,
     headers: { ...init.headers, authorization: `Bearer ${tokens.accessToken}` },
@@ -177,6 +185,28 @@ async function apiFetch(
     return apiFetch(deps, url, init, attempt + 1);
   }
   return res;
+}
+
+/**
+ * Đọc chi tiết lỗi thật từ body (Dropbox trả `{"error_summary": "...", ...}`
+ * cho hầu hết lỗi 4xx) — trước đây các nhánh lỗi dưới chỉ báo mã HTTP trần,
+ * không đủ để tự chẩn đoán (ví dụ 400 có thể do path sai định dạng, thiếu
+ * scope quyền, hay app type App-Folder/Full Dropbox không khớp cấu hình).
+ * An toàn gọi TRƯỚC khi bất kỳ chỗ nào khác đọc `res.json()`/`res.arrayBuffer()`
+ * (mỗi Response chỉ đọc body được đúng 1 lần).
+ */
+async function describeError(res: Response): Promise<string> {
+  try {
+    const text = await res.text();
+    try {
+      const json = JSON.parse(text);
+      return json.error_summary || json.error_description || text.slice(0, 300);
+    } catch {
+      return text.slice(0, 300);
+    }
+  } catch {
+    return "";
+  }
 }
 
 export type DropboxWriteMode =
@@ -224,7 +254,9 @@ export async function uploadFile(
     throw new DropboxConflictError(dropboxPath);
   }
   if (!res.ok) {
-    throw new Error(`Upload Dropbox thất bại (${dropboxPath}): HTTP ${res.status}`);
+    throw new Error(
+      `Upload Dropbox thất bại (${dropboxPath}): HTTP ${res.status} — ${await describeError(res)}`,
+    );
   }
   const json = await res.json();
   return { rev: json.rev, serverModified: json.server_modified };
@@ -238,7 +270,9 @@ export async function downloadFile(
     headers: { "dropbox-api-arg": JSON.stringify({ path: dropboxPath }) },
   });
   if (!res.ok) {
-    throw new Error(`Download Dropbox thất bại (${dropboxPath}): HTTP ${res.status}`);
+    throw new Error(
+      `Download Dropbox thất bại (${dropboxPath}): HTTP ${res.status} — ${await describeError(res)}`,
+    );
   }
   const apiResultHeader = res.headers.get("dropbox-api-result") || "{}";
   const meta = JSON.parse(apiResultHeader);
@@ -253,7 +287,9 @@ export async function deleteFile(deps: DropboxClientDeps, dropboxPath: string): 
   });
   // 409 với reason path_lookup/not_found nghĩa là đã bị xoá từ trước — coi như thành công (idempotent).
   if (!res.ok && res.status !== 409) {
-    throw new Error(`Xoá file Dropbox thất bại (${dropboxPath}): HTTP ${res.status}`);
+    throw new Error(
+      `Xoá file Dropbox thất bại (${dropboxPath}): HTTP ${res.status} — ${await describeError(res)}`,
+    );
   }
 }
 
@@ -301,7 +337,9 @@ export async function listFolderRecursive(
     return [];
   }
   if (!res.ok) {
-    throw new Error(`Liệt kê thư mục Dropbox thất bại: HTTP ${res.status}`);
+    throw new Error(
+      `Liệt kê thư mục Dropbox thất bại: HTTP ${res.status} — ${await describeError(res)}`,
+    );
   }
 
   for (;;) {
@@ -323,7 +361,9 @@ export async function listFolderRecursive(
       body: JSON.stringify({ cursor: json.cursor }),
     });
     if (!res.ok) {
-      throw new Error(`Phân trang danh sách Dropbox thất bại: HTTP ${res.status}`);
+      throw new Error(
+        `Phân trang danh sách Dropbox thất bại: HTTP ${res.status} — ${await describeError(res)}`,
+      );
     }
   }
   return entries;

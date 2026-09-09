@@ -49,11 +49,13 @@ describe("PKCE", () => {
 
 describe("Token exchange", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    // dropbox_sync.ts dùng nativeFetch (bỏ qua proxy /.proxy/ của server Rust —
+    // xem comment ở exchangeCodeForTokens()), nên mock global này, không phải fetch.
+    vi.stubGlobal("nativeFetch", vi.fn());
   });
 
   test("exchangeCodeForTokens throws a clear error when Dropbox doesn't grant a refresh_token", async () => {
-    (fetch as any).mockResolvedValueOnce(
+    (nativeFetch as any).mockResolvedValueOnce(
       jsonResponse(200, { access_token: "at", expires_in: 14400 }),
     );
     await expect(exchangeCodeForTokens("key", "code", "verifier")).rejects.toThrow(/refresh_token/);
@@ -61,7 +63,7 @@ describe("Token exchange", () => {
 
   test("exchangeCodeForTokens computes expiresAt from expires_in", async () => {
     const now = Date.now();
-    (fetch as any).mockResolvedValueOnce(
+    (nativeFetch as any).mockResolvedValueOnce(
       jsonResponse(200, { access_token: "at", refresh_token: "rt", expires_in: 100 }),
     );
     const tokens = await exchangeCodeForTokens("key", "code", "verifier");
@@ -72,7 +74,7 @@ describe("Token exchange", () => {
   });
 
   test("exchangeCodeForTokens surfaces Dropbox's error_description on failure", async () => {
-    (fetch as any).mockResolvedValueOnce(
+    (nativeFetch as any).mockResolvedValueOnce(
       jsonResponse(400, { error: "invalid_grant", error_description: "mã đã hết hạn" }),
     );
     await expect(exchangeCodeForTokens("key", "bad-code", "verifier")).rejects.toThrow(
@@ -98,7 +100,9 @@ describe("apiFetch behavior (via uploadFile as a representative call)", () => {
   }
 
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    // dropbox_sync.ts dùng nativeFetch (bỏ qua proxy /.proxy/ của server Rust —
+    // xem comment ở exchangeCodeForTokens()), nên mock global này, không phải fetch.
+    vi.stubGlobal("nativeFetch", vi.fn());
   });
 
   test("401 triggers exactly one refresh-and-retry, then succeeds", async () => {
@@ -109,7 +113,7 @@ describe("apiFetch behavior (via uploadFile as a representative call)", () => {
       stored = t;
     });
     const deps = makeDeps({ saveTokens, getTokens: vi.fn().mockImplementation(async () => stored) });
-    (fetch as any)
+    (nativeFetch as any)
       .mockResolvedValueOnce(jsonResponse(401, { error: "expired_access_token" }))
       .mockResolvedValueOnce(
         jsonResponse(200, { access_token: "new-token", expires_in: 14400 }),
@@ -122,51 +126,61 @@ describe("apiFetch behavior (via uploadFile as a representative call)", () => {
       expect.objectContaining({ accessToken: "new-token" }),
     );
     // Lần gọi cuối (upload thật) phải mang access token MỚI, không phải token cũ.
-    const lastCallHeaders = (fetch as any).mock.calls[2][1].headers;
+    const lastCallHeaders = (nativeFetch as any).mock.calls[2][1].headers;
     expect(lastCallHeaders.authorization).toBe("Bearer new-token");
   });
 
   test("429 with Retry-After retries and eventually succeeds", async () => {
     const deps = makeDeps();
-    (fetch as any)
+    (nativeFetch as any)
       .mockResolvedValueOnce(jsonResponse(429, {}, { "retry-after": "0" }))
       .mockResolvedValueOnce(jsonResponse(200, { rev: "rev1", server_modified: "x" }));
 
     const result = await uploadFile(deps, "/a.md", new Uint8Array([1]), { tag: "add" });
     expect(result.rev).toBe("rev1");
-    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(nativeFetch).toHaveBeenCalledTimes(2);
   });
 
   test("429 gives up after MAX_RETRIES and returns the failing response as an error", async () => {
     const deps = makeDeps();
-    (fetch as any).mockResolvedValue(jsonResponse(429, {}, { "retry-after": "0" }));
+    (nativeFetch as any).mockResolvedValue(jsonResponse(429, {}, { "retry-after": "0" }));
     await expect(
       uploadFile(deps, "/a.md", new Uint8Array([1]), { tag: "add" }),
     ).rejects.toThrow(/Upload Dropbox thất bại/);
     // 1 lần gọi ban đầu + tối đa 5 lần retry = 6 tổng cộng, không lặp vô hạn.
-    expect((fetch as any).mock.calls.length).toBeLessThanOrEqual(6);
+    expect((nativeFetch as any).mock.calls.length).toBeLessThanOrEqual(6);
   });
 
   test("409 on upload raises DropboxConflictError (not a generic Error)", async () => {
     const deps = makeDeps();
-    (fetch as any).mockResolvedValueOnce(jsonResponse(409, { error_summary: "conflict" }));
+    (nativeFetch as any).mockResolvedValueOnce(jsonResponse(409, { error_summary: "conflict" }));
     await expect(
       uploadFile(deps, "/a.md", new Uint8Array([1]), { tag: "add" }),
     ).rejects.toBeInstanceOf(DropboxConflictError);
   });
 
+  test("a non-409 upload failure surfaces Dropbox's error_summary, not just the bare HTTP code", async () => {
+    const deps = makeDeps();
+    (nativeFetch as any).mockResolvedValueOnce(
+      jsonResponse(400, { error_summary: "path/malformed_path/.." }),
+    );
+    await expect(
+      uploadFile(deps, "/a.md", new Uint8Array([1]), { tag: "add" }),
+    ).rejects.toThrow(/path\/malformed_path/);
+  });
+
   test("uploadFile sends the correct mode argument for add vs update", async () => {
     const deps = makeDeps();
-    (fetch as any).mockResolvedValue(jsonResponse(200, { rev: "r", server_modified: "x" }));
+    (nativeFetch as any).mockResolvedValue(jsonResponse(200, { rev: "r", server_modified: "x" }));
     await uploadFile(deps, "/a.md", new Uint8Array([1]), { tag: "update", rev: "prev-rev" });
-    const arg = JSON.parse((fetch as any).mock.calls[0][1].headers["dropbox-api-arg"]);
+    const arg = JSON.parse((nativeFetch as any).mock.calls[0][1].headers["dropbox-api-arg"]);
     expect(arg.mode).toEqual({ ".tag": "update", update: "prev-rev" });
   });
 
   test("downloadFile reads rev/server_modified from the dropbox-api-result header and returns raw bytes", async () => {
     const deps = makeDeps();
     const bytes = new Uint8Array([104, 105]); // "hi"
-    (fetch as any).mockResolvedValueOnce(
+    (nativeFetch as any).mockResolvedValueOnce(
       new Response(bytes, {
         status: 200,
         headers: { "dropbox-api-result": JSON.stringify({ rev: "r9", server_modified: "s9" }) },
@@ -180,7 +194,7 @@ describe("apiFetch behavior (via uploadFile as a representative call)", () => {
 
   test("deleteFile treats 409 (already gone) as success, not an error", async () => {
     const deps = makeDeps();
-    (fetch as any).mockResolvedValueOnce(jsonResponse(409, { error_summary: "path_lookup/not_found" }));
+    (nativeFetch as any).mockResolvedValueOnce(jsonResponse(409, { error_summary: "path_lookup/not_found" }));
     await expect(deleteFile(deps, "/gone.md")).resolves.toBeUndefined();
   });
 });
@@ -199,11 +213,13 @@ describe("listFolderRecursive", () => {
   }
 
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    // dropbox_sync.ts dùng nativeFetch (bỏ qua proxy /.proxy/ của server Rust —
+    // xem comment ở exchangeCodeForTokens()), nên mock global này, không phải fetch.
+    vi.stubGlobal("nativeFetch", vi.fn());
   });
 
   test("follows has_more/cursor across pages and strips the folder prefix", async () => {
-    (fetch as any)
+    (nativeFetch as any)
       .mockResolvedValueOnce(
         jsonResponse(200, {
           entries: [
@@ -232,28 +248,39 @@ describe("listFolderRecursive", () => {
       { path: "a.md", rev: "r1", serverModified: "s1", deleted: false },
       { path: "b.md", rev: "", serverModified: "", deleted: true },
     ]);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    const secondCallBody = JSON.parse((fetch as any).mock.calls[1][1].body);
+    expect(nativeFetch).toHaveBeenCalledTimes(2);
+    const secondCallBody = JSON.parse((nativeFetch as any).mock.calls[1][1].body);
     expect(secondCallBody.cursor).toBe("cursor-1");
   });
 
   test("409 (folder not yet created on Dropbox) returns an empty list, not an error", async () => {
-    (fetch as any).mockResolvedValueOnce(jsonResponse(409, { error_summary: "path/not_found" }));
+    (nativeFetch as any).mockResolvedValueOnce(jsonResponse(409, { error_summary: "path/not_found" }));
     const entries = await listFolderRecursive(makeDeps(), "ChessNote");
     expect(entries).toEqual([]);
+  });
+
+  test("a non-409 failure (e.g. 400 malformed path) surfaces Dropbox's error_summary", async () => {
+    (nativeFetch as any).mockResolvedValueOnce(
+      jsonResponse(400, { error_summary: "path/malformed_path/." }),
+    );
+    await expect(listFolderRecursive(makeDeps(), "ChessNote")).rejects.toThrow(
+      /path\/malformed_path/,
+    );
   });
 });
 
 describe("refreshAccessToken", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    // dropbox_sync.ts dùng nativeFetch (bỏ qua proxy /.proxy/ của server Rust —
+    // xem comment ở exchangeCodeForTokens()), nên mock global này, không phải fetch.
+    vi.stubGlobal("nativeFetch", vi.fn());
   });
 
   test("posts grant_type=refresh_token with the given refresh token", async () => {
-    (fetch as any).mockResolvedValueOnce(jsonResponse(200, { access_token: "at2", expires_in: 100 }));
+    (nativeFetch as any).mockResolvedValueOnce(jsonResponse(200, { access_token: "at2", expires_in: 100 }));
     const result = await refreshAccessToken("app-key", "rt-value");
     expect(result.accessToken).toBe("at2");
-    const body = (fetch as any).mock.calls[0][1].body as string;
+    const body = (nativeFetch as any).mock.calls[0][1].body as string;
     const params = new URLSearchParams(body);
     expect(params.get("grant_type")).toBe("refresh_token");
     expect(params.get("refresh_token")).toBe("rt-value");

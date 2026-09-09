@@ -141,6 +141,19 @@ export function isCapacitor(): Promise<boolean> {
 }
 
 /**
+ * Whether a real server is reachable behind this client to service the
+ * `/.proxy/` endpoint. False for the standalone Capacitor mobile app AND the
+ * standalone Tauri desktop app (both static bundles, no server) — broader
+ * than `isCapacitor()`, which misses the standalone-Desktop case. Plugs that
+ * need a plain external fetch() (e.g. to a public API) should use the global
+ * `nativeFetch` instead of `fetch()` when this is false, since `fetch()` is
+ * routed through the server's `/.proxy/` and would fail with no server.
+ */
+export function hasServerProxy(): Promise<boolean> {
+  return syscall("system.hasServerProxy");
+}
+
+/**
  * The current user's identity. `username` falls back to "me" when the
  * deployment has no accounts.
  */
