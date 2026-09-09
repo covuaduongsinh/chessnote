@@ -114,28 +114,34 @@ config.define("pdfExport", {
   }
 })
 
-service.define {
-  selector = "export",
-  match = {
-    name = "PDF: Xuất file PDF",
-    description = "Xuất trang hiện tại ra PDF (mặc định 2 cột & bàn cờ 400px, chỉnh trong CONFIG.md hoặc Configuration Manager; ghi đè theo từng trang bằng frontmatter pdfColumns/pdfBoardSize, bàn cờ dạng ảnh tĩnh, đánh số trang tự động)"
-  },
-  run = function(data)
-    local defaultBoardSize = config.get("pdfExport.boardSize", 400)
-    local boardSize = data.pageMeta.pdfBoardSize or defaultBoardSize
-    local boardHtml = chess.renderPageForPdf(data.text, boardSize)
-    local defaultColumns = config.get("pdfExport.columns", 2)
-    local columns = data.pageMeta.pdfColumns or defaultColumns
-    local columnCss = columns == 1 and "column-count:1;" or "column-count:2;column-gap:24px;"
-    local pageName = data.pageMeta.name or "export"
-    local safeName = string.gsub(pageName, "/", "_")
-    local fullHtml = "<!doctype html><html><head><meta charset=\"utf-8\">" ..
-      "<style>" ..
-      "body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#111;margin:0;padding:0 12px;column-fill:auto;" .. columnCss .. "}" ..
-      "h1,h2,h3{break-after:avoid;}" ..
-      "p{orphans:3;widows:3;}" ..
-      "</style></head><body>" .. boardHtml .. "</body></html>"
-    editor.exportPdf(fullHtml, safeName .. ".pdf")
-  end
-}
+-- Bản mobile (Capacitor, Android/iOS) không có server nền — editor.exportPdf sẽ
+-- gọi fetch tới chính WebView cục bộ (không có route đó) và báo lỗi mạng khó
+-- hiểu. Không đăng ký service này trên Capacitor để "Export: Page Or Selection"
+-- đơn giản là không hiện tuỳ chọn PDF nữa, thay vì hiện ra rồi báo lỗi.
+if not system.isCapacitor() then
+  service.define {
+    selector = "export",
+    match = {
+      name = "PDF: Xuất file PDF",
+      description = "Xuất trang hiện tại ra PDF (mặc định 2 cột & bàn cờ 400px, chỉnh trong CONFIG.md hoặc Configuration Manager; ghi đè theo từng trang bằng frontmatter pdfColumns/pdfBoardSize, bàn cờ dạng ảnh tĩnh, đánh số trang tự động)"
+    },
+    run = function(data)
+      local defaultBoardSize = config.get("pdfExport.boardSize", 400)
+      local boardSize = data.pageMeta.pdfBoardSize or defaultBoardSize
+      local boardHtml = chess.renderPageForPdf(data.text, boardSize)
+      local defaultColumns = config.get("pdfExport.columns", 2)
+      local columns = data.pageMeta.pdfColumns or defaultColumns
+      local columnCss = columns == 1 and "column-count:1;" or "column-count:2;column-gap:24px;"
+      local pageName = data.pageMeta.name or "export"
+      local safeName = string.gsub(pageName, "/", "_")
+      local fullHtml = "<!doctype html><html><head><meta charset=\"utf-8\">" ..
+        "<style>" ..
+        "body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#111;margin:0;padding:0 12px;column-fill:auto;" .. columnCss .. "}" ..
+        "h1,h2,h3{break-after:avoid;}" ..
+        "p{orphans:3;widows:3;}" ..
+        "</style></head><body>" .. boardHtml .. "</body></html>"
+      editor.exportPdf(fullHtml, safeName .. ".pdf")
+    end
+  }
+end
 ```

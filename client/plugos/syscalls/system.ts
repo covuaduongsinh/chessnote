@@ -252,6 +252,11 @@ export function systemSyscalls(
       callback: () => publicVersion,
       description: "Returns the running SilverBullet version.",
     },
+    "system.isCapacitor": {
+      callback: (): boolean => typeof (globalThis as any).Capacitor !== "undefined",
+      description:
+        "Whether this client is running inside the Capacitor mobile app shell (Android/iOS), which has no backend server — anything needing one (PDF export, server-proxied AI features) should check this and degrade gracefully instead of failing on a network error.",
+    },
     "system.getProfile": {
       callback: (): Promise<ClientProfile> => loadProfile(client),
       description:

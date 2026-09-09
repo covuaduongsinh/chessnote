@@ -131,6 +131,16 @@ export function getVersion(): Promise<string> {
 }
 
 /**
+ * Whether this client is running inside the Capacitor mobile app shell
+ * (Android/iOS) — which has no backend server, so anything needing one
+ * (PDF export, AI features proxied through the server) should check this
+ * and degrade gracefully instead of failing on a network error.
+ */
+export function isCapacitor(): Promise<boolean> {
+  return syscall("system.isCapacitor");
+}
+
+/**
  * The current user's identity. `username` falls back to "me" when the
  * deployment has no accounts.
  */

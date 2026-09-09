@@ -723,6 +723,13 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   let isTagSuggestOn = false;
   let tagSuggestRequestSeq = 0;
   let tagSuggestResult = null; // { tags, summary } | { error }
+  // AI features need a server (proxied through /.proxy/... to ai-sidecar) that
+  // the offline Capacitor mobile build doesn't have — set once at init below,
+  // checked before every AI call so mobile gets a clear message instead of a
+  // raw network-failure error.
+  let isCapacitorEnv = false;
+  const AI_UNAVAILABLE_MESSAGE =
+    "Tính năng AI cần bản Web hoặc Desktop, chưa hỗ trợ trên Mobile.";
 
   const boardEl = document.getElementById("${widgetId}_board");
   const arrowsEl = document.getElementById("${widgetId}_arrows");
@@ -752,6 +759,15 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   const aiAnnotatePanel = document.getElementById("${widgetId}_ai_annotate_panel");
   const aiTagToggleBtn = document.getElementById("${widgetId}_ai_tag_toggle");
   const aiTagPanel = document.getElementById("${widgetId}_ai_tag_panel");
+
+  syscall("system.isCapacitor").then((v) => {
+    isCapacitorEnv = v;
+    if (!v) return;
+    for (const btn of [aiExplainToggleBtn, aiAnnotateToggleBtn, aiTagToggleBtn]) {
+      btn.disabled = true;
+      btn.title = AI_UNAVAILABLE_MESSAGE;
+    }
+  }).catch(() => {});
 
   function parseFenBoard(f) {
     const parts = f.split(" ");
@@ -821,6 +837,11 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   // Kết quả cache theo idx để xem lại nước cũ không tốn tiền gọi lại.
   async function ensureAiExplain(idx) {
     if (!isAiExplainOn) return;
+    if (isCapacitorEnv) {
+      aiExplainPanel.classList.add("error");
+      aiExplainPanel.innerText = "⚠️ " + AI_UNAVAILABLE_MESSAGE;
+      return;
+    }
     if (idx < 0 || !reviewedMoves[idx] || reviewedMoves[idx].classification == null) {
       aiExplainPanel.classList.remove("error");
       aiExplainPanel.innerText = "Bật \\"Game Review\\" rồi chọn một nước để xem giải thích.";
@@ -858,6 +879,11 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   // Bình luận toàn ván: CHỈ 1 lần gọi AI cho cả ván (không lặp theo từng nước),
   // dùng toàn bộ fullReview (đã có sau khi bật Game Review) làm ngữ cảnh.
   async function ensureAnnotate() {
+    if (isCapacitorEnv) {
+      aiAnnotatePanel.classList.add("error");
+      aiAnnotatePanel.innerText = "⚠️ " + AI_UNAVAILABLE_MESSAGE;
+      return;
+    }
     if (annotateResult) {
       aiAnnotatePanel.classList.remove("error");
       aiAnnotatePanel.innerText = annotateResult;
@@ -940,6 +966,11 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   }
 
   async function ensureTagSuggest() {
+    if (isCapacitorEnv) {
+      tagSuggestResult = { error: AI_UNAVAILABLE_MESSAGE };
+      renderTagSuggest();
+      return;
+    }
     if (tagSuggestResult) {
       renderTagSuggest();
       return;

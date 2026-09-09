@@ -13,7 +13,7 @@
 // khi câu hỏi tự nhiên chứa 1 từ không khớp field nào ("tôi", "tại sao", "hay"...).
 // Thay bằng so khớp từ khoá kiểu OR đơn giản (không phân biệt dấu) trên một đoạn
 // văn bản gộp mỗi ván (metadata + tóm tắt AI của Giai đoạn C nếu đã có).
-import { editor, index, markdown, space } from "@silverbulletmd/silverbullet/syscalls";
+import { editor, index, markdown, space, system } from "@silverbulletmd/silverbullet/syscalls";
 import type { ChessGameFields, ChessGameObject } from "../index.ts";
 import { extractFrontMatter } from "../../index/frontmatter.ts";
 import { ANTI_HALLUCINATION_RULE } from "./coach.ts";
@@ -125,6 +125,14 @@ export async function buildContextEntry(game: ChessGameObject): Promise<QaContex
 
 /** Command "Chess: Hỏi AI". */
 export async function commandAskAi() {
+  if (await system.isCapacitor()) {
+    await editor.flashNotification(
+      "Tính năng AI cần bản Web hoặc Desktop, chưa hỗ trợ trên Mobile.",
+      "error",
+    );
+    return;
+  }
+
   const question = await editor.prompt("Hỏi AI về các ván cờ trong không gian ghi chú:");
   if (!question) return;
 
