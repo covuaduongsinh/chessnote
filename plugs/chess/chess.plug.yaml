@@ -185,6 +185,10 @@ functions:
         - { name: input, type: object }
       returns:
         - { type: object }
+  chessAskAiCommand:
+    path: ./ai/qa.ts:commandAskAi
+    command:
+      name: "Chess: Hỏi AI"
   chessApplyTagSuggestion:
     path: ./ai/tagging.ts:applyTagSuggestion
     syscall:
