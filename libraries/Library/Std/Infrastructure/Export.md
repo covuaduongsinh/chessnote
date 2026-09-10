@@ -144,7 +144,7 @@ if not system.isCapacitor() then
       local fullHtml = "<!doctype html><html><head><meta charset=\"utf-8\">" ..
         "<style>" ..
         "body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#111;margin:0;padding:0 12px;column-fill:auto;" .. columnCss .. "}" ..
-        "h1,h2,h3{break-after:avoid;}" ..
+        "h1,h2,h3,h4,h5,h6{break-after:avoid !important;page-break-after:avoid !important;-webkit-column-break-after:avoid !important;}" ..
         "p{orphans:3;widows:3;}" ..
         "</style></head><body>" .. boardHtml .. "</body></html>"
       editor.exportPdf(fullHtml, safeName .. ".pdf")

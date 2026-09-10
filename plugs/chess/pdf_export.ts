@@ -32,24 +32,91 @@ function buildPdfExtraCss(boardSize: number): string {
   --board-border: #78350f;
 }
 .chessnote-static-board {
-  width: ${boardSize}px;
-  max-width: 100%;
-  margin: 0 auto 14px;
-  break-inside: avoid;
-  page-break-inside: avoid;
+  width: 100%;
+  max-width: ${boardSize}px;
+  margin: 10px auto 16px;
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+  -webkit-column-break-inside: avoid !important;
+  display: block;
+  box-sizing: border-box;
+}
+.chessnote-static-board .chess-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--text-main);
+  break-after: avoid !important;
+  page-break-after: avoid !important;
+  -webkit-column-break-after: avoid !important;
 }
 .chessnote-static-board .chess-board {
-  width: ${boardSize}px;
-  height: ${boardSize}px;
-  max-width: 100%;
-  aspect-ratio: 1;
+  width: 100% !important;
+  max-width: ${boardSize}px !important;
+  height: auto !important;
+  aspect-ratio: 1 / 1 !important;
+  margin: 0 auto;
+  display: grid !important;
+  grid-template-columns: repeat(8, 1fr) !important;
+  grid-template-rows: repeat(8, 1fr) !important;
+  border: 1.5px solid var(--board-border, #78350f);
+  border-radius: 4px;
+  overflow: hidden;
+  box-sizing: border-box;
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+  -webkit-column-break-inside: avoid !important;
+}
+.chessnote-static-board .chess-sq {
+  width: 100% !important;
+  height: auto !important;
+  aspect-ratio: 1 / 1 !important;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.chessnote-static-board .chess-piece {
+  width: 86% !important;
+  height: 86% !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.chessnote-static-board .chess-piece svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.chessnote-static-board .chess-coord {
+  position: absolute;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0.8;
+}
+.chessnote-static-board .coord-file { bottom: 1px; right: 2px; }
+.chessnote-static-board .coord-rank { top: 1px; left: 2px; }
+.chessnote-static-board .puzzle-hint-box {
+  margin-top: 6px;
+  break-inside: avoid !important;
+}
+.chessnote-static-board .fen-footer {
+  margin-top: 6px;
+  break-inside: avoid !important;
 }
 .chess-pgn-movetext {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 4px 0 16px;
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 4px 0 14px;
   word-break: break-word;
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+  -webkit-column-break-inside: avoid !important;
 }
 `;
 }
