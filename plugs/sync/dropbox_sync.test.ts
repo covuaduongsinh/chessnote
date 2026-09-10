@@ -9,6 +9,7 @@ import {
   generateCodeVerifier,
   listFolderRecursive,
   refreshAccessToken,
+  toAsciiSafeHeaderJson,
   uploadFile,
   type DropboxClientDeps,
   type DropboxTokens,
@@ -44,6 +45,37 @@ describe("PKCE", () => {
     expect(parsed.searchParams.get("code_challenge_method")).toBe("S256");
     expect(parsed.searchParams.get("token_access_type")).toBe("offline");
     expect(parsed.searchParams.has("redirect_uri")).toBe(false);
+  });
+});
+
+describe("toAsciiSafeHeaderJson", () => {
+  // Bug thật phát hiện qua kiểm chứng tay: upload 1 file có dấu tiếng Việt
+  // trong TÊN FILE khiến trình duyệt throw ngay lúc set header
+  // "dropbox-api-arg" ("String contains non ISO-8859-1 code point") --
+  // KHÔNG phải lỗi từ Dropbox, request chưa kịp rời máy. Dropbox API yêu cầu
+  // tự escape ký tự ngoài ASCII thành \uXXXX trước khi gửi trong header.
+  test("escapes non-ASCII characters (Vietnamese diacritics) as \\uXXXX", () => {
+    const json = toAsciiSafeHeaderJson({ path: "/Bài giảng.md" });
+    expect(json).not.toMatch(/[^\x00-\x7f]/); // toàn bộ output phải là ASCII thuần
+    expect(json).toContain("\\u00e0"); // "à" = U+00E0
+  });
+
+  test("the escaped output is a valid Headers value (round-trips through the real Fetch Headers API)", () => {
+    const json = toAsciiSafeHeaderJson({ path: "/Bài giảng - Escacs per a tothom.md" });
+    // Đây chính là bước trước đây throw thật trên trình duyệt -- test này
+    // tái hiện đúng lỗi đó bằng Headers API thật của Node (không mock).
+    expect(() => new Headers({ "dropbox-api-arg": json })).not.toThrow();
+  });
+
+  test("parses back to the original value (Dropbox un-escapes \\uXXXX server-side; JSON.parse does the same)", () => {
+    const original = { path: "/Bài giảng - Giải phóng cột dọc.md" };
+    const json = toAsciiSafeHeaderJson(original);
+    expect(JSON.parse(json)).toEqual(original);
+  });
+
+  test("leaves plain-ASCII paths unchanged (aside from normal JSON quoting)", () => {
+    const json = toAsciiSafeHeaderJson({ path: "/notes/game1.md" });
+    expect(json).toBe('{"path":"/notes/game1.md"}');
   });
 });
 

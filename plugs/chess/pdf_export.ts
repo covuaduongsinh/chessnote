@@ -32,11 +32,16 @@ function buildPdfExtraCss(boardSize: number): string {
   --board-border: #78350f;
 }
 .chessnote-static-board {
-  max-width: ${boardSize}px;
+  width: ${boardSize}px;
+  max-width: 100%;
   margin: 0 auto 14px;
   break-inside: avoid;
+  page-break-inside: avoid;
 }
 .chessnote-static-board .chess-board {
+  width: ${boardSize}px;
+  height: ${boardSize}px;
+  max-width: 100%;
   aspect-ratio: 1;
 }
 .chess-pgn-movetext {

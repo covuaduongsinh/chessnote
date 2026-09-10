@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import type { FileMeta } from "@silverbulletmd/silverbullet/type/index";
-import { performSync, conflictPath, isUtf8Decodable, type SpaceOps } from "./sync_engine.ts";
+import {
+  performSync,
+  conflictPath,
+  isUtf8Decodable,
+  summarizeSyncErrorDetails,
+  type SpaceOps,
+  type SyncReport,
+} from "./sync_engine.ts";
 import { RemoteConflictError, type RemoteFileEntry, type SyncProvider, type WriteMode } from "./sync_provider.ts";
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -127,6 +134,56 @@ describe("isUtf8Decodable", () => {
   });
   test("returns null for invalid UTF-8 byte sequences", () => {
     expect(isUtf8Decodable(new Uint8Array([0xff, 0xfe, 0x00, 0xff]))).toBeNull();
+  });
+});
+
+function emptyReport(overrides: Partial<SyncReport> = {}): SyncReport {
+  return {
+    uploaded: [],
+    downloaded: [],
+    deletedLocal: [],
+    deletedRemote: [],
+    conflicts: [],
+    errors: [],
+    ...overrides,
+  };
+}
+
+describe("summarizeSyncErrorDetails", () => {
+  // Trước đây các thông báo chỉ hiện "1 lỗi" (đếm số lượng, xem
+  // `summarizeSyncReport`) mà KHÔNG hiện lý do thật -- người dùng không tự
+  // chẩn đoán được gì. Đây là hàm sửa đúng lỗ hổng đó.
+  test("returns an empty string when there are no errors", () => {
+    expect(summarizeSyncErrorDetails(emptyReport())).toBe("");
+  });
+
+  test("includes the path and the real error message for a single failure", () => {
+    const report = emptyReport({ errors: [{ path: "notes/game2.md", error: "HTTP 404 — not found" }] });
+    expect(summarizeSyncErrorDetails(report)).toBe("notes/game2.md: HTTP 404 — not found");
+  });
+
+  test("joins multiple failures with a separator", () => {
+    const report = emptyReport({
+      errors: [
+        { path: "a.md", error: "boom-a" },
+        { path: "b.md", error: "boom-b" },
+      ],
+    });
+    expect(summarizeSyncErrorDetails(report)).toBe("a.md: boom-a | b.md: boom-b");
+  });
+
+  test("caps the number shown and notes how many more were omitted", () => {
+    const report = emptyReport({
+      errors: [
+        { path: "a.md", error: "1" },
+        { path: "b.md", error: "2" },
+        { path: "c.md", error: "3" },
+        { path: "d.md", error: "4" },
+        { path: "e.md", error: "5" },
+      ],
+    });
+    const result = summarizeSyncErrorDetails(report, 3);
+    expect(result).toBe("a.md: 1 | b.md: 2 | c.md: 3 (và 2 lỗi khác)");
   });
 });
 

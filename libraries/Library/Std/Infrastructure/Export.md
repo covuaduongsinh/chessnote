@@ -42,7 +42,14 @@ command.define {
     if not selectedOption then
       return
     end
-    service.invoke(selectedOption, exportObj)
+    -- Bug thật phát hiện qua kiểm chứng tay: nếu 1 service (ví dụ PDF, khi
+    -- headless Chrome không khởi động được) throw, lỗi đó KHÔNG hề hiện ra
+    -- cho người dùng -- không có thông báo gì cả, cứ như không bấm gì. Bọc
+    -- pcall để LUÔN có phản hồi, giống mẫu đã dùng ở Github.md/Share.md.
+    local ok, err = pcall(function() service.invoke(selectedOption, exportObj) end)
+    if not ok then
+      editor.flashNotification("Export failed: " .. tostring(err), "error")
+    end
   end
 }
 ```

@@ -16,7 +16,7 @@
 * **Build AI Sidecar**: `cd ai-sidecar && npm run build` (hoặc chạy trực tiếp `npx tsx src/server.ts`)
 
 ### 1.2. Chạy Ứng Dụng (Run)
-* **Chạy Server Rust (Debug mode)**: `cargo run <PATH_TO_SPACE>` (phục vụ bundle trực tiếp từ `client_bundle/`)
+* **Chạy Server Rust (Debug mode)**: `cargo run <PATH_TO_SPACE>` (phục vụ bundle trực tiếp từ `client_bundle/`). Trên Windows, nếu cần dùng PDF export/runtime API (headless Chrome), đặt thêm biến môi trường `SB_CHROME_DATA_DIR` chỉ tới 1 đường dẫn tuyệt đối đơn giản (ví dụ `C:\Users\<tên>\chessnote-chrome-data`) — thư mục mặc định (`<space>/.chrome-data`, nằm sâu trong Space, có dấu chấm đầu) khiến Chrome/Edge lặng lẽ thoát ngay (exit code 21) trước khi trả về websocket URL, xem chi tiết trong memory.
 * **Chạy AI Sidecar độc lập**: `cd ai-sidecar && npm start` (mặc định cổng `3457`)
 * **Chạy Mobile Android**: `npm run mobile:run:android` (hoặc `npm run mobile:android` để mở Android Studio)
 * **Chạy Desktop App Dev (Tauri)**: `npm run desktop:dev`

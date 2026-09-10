@@ -6,7 +6,12 @@
 import { config, editor } from "@silverbulletmd/silverbullet/syscalls";
 import { dropboxStatus, runDropboxSync } from "./dropbox_bridge.ts";
 import { runWebDavSync, webdavStatus } from "./webdav_bridge.ts";
-import { summarizeSyncReport, syncReportIsNotable, type SyncReport } from "./sync_engine.ts";
+import {
+  summarizeSyncErrorDetails,
+  summarizeSyncReport,
+  syncReportIsNotable,
+  type SyncReport,
+} from "./sync_engine.ts";
 
 // Lock riêng theo tên provider — chỉ chặn 2 lượt sync CHỒNG LẤP của CÙNG 1
 // provider (ví dụ interval bắn lại trước khi lượt trước xong); KHÔNG chặn
@@ -20,8 +25,9 @@ async function runOneQuiet(name: string, run: () => Promise<SyncReport | null>):
     const report = await run();
     if (!report) return; // chưa cấu hình/chưa đăng nhập provider này -> bỏ qua êm
     if (syncReportIsNotable(report)) {
+      const detail = report.errors.length ? ` — ${summarizeSyncErrorDetails(report)}` : "";
       await editor.flashNotification(
-        `Đồng bộ ${name} tự động: ${summarizeSyncReport(report)}.`,
+        `Đồng bộ ${name} tự động: ${summarizeSyncReport(report)}.${detail}`,
         report.errors.length ? "warning" : "info",
       );
     }

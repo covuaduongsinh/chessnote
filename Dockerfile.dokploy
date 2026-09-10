@@ -1,0 +1,65 @@
+# ==============================================================================
+# Stage 1: Build Plugs, Space Lua and Web Client Bundle
+# ==============================================================================
+FROM node:22-alpine AS frontend-builder
+
+WORKDIR /app
+RUN apk add --no-cache git
+
+COPY package.json package-lock.json tsconfig.json biome.json ./
+RUN npm ci
+
+COPY client ./client
+COPY plug-api ./plug-api
+COPY plugs ./plugs
+COPY libraries ./libraries
+COPY build ./build
+COPY version.ts version.json ./
+
+RUN npm run build
+
+# ==============================================================================
+# Stage 2: Build Rust Server Binary (silverbullet)
+# ==============================================================================
+FROM rust:1.85-alpine AS backend-builder
+
+WORKDIR /app
+RUN apk add --no-cache musl-dev pkgconfig openssl-dev g++ make
+
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY server-common ./server-common
+COPY server ./server
+COPY server-runtime-chrome ./server-runtime-chrome
+COPY server-merge ./server-merge
+COPY bin ./bin
+COPY version.json version.ts ./
+COPY --from=frontend-builder /app/client_bundle ./client_bundle
+
+RUN cargo build --release -p silverbullet
+
+# ==============================================================================
+# Stage 3: Minimal Production Image with Chromium Runtime Support
+# ==============================================================================
+FROM alpine:latest
+
+RUN apk add --no-cache git curl bash tini openssh-client chromium
+
+ENV SB_HOSTNAME=0.0.0.0 \
+    SB_FOLDER=/space \
+    SB_PORT=3000 \
+    CHROMIUM_PATH=/usr/bin/chromium-browser
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl --fail "http://localhost:/.instance" || exit 1
+
+# Wipe stock Alpine accounts so docker-entrypoint.sh can handle arbitrary PUID/PGID
+RUN echo "" > /etc/group && echo "root:x:0:0:root:/root:/bin/sh" > /etc/passwd
+
+COPY ./docker-entrypoint.sh /docker-entrypoint.sh
+COPY --from=backend-builder /app/target/release/silverbullet /silverbullet
+
+RUN chmod +x /silverbullet /docker-entrypoint.sh
+
+ENTRYPOINT ["/sbin/tini", "--", "/docker-entrypoint.sh"]

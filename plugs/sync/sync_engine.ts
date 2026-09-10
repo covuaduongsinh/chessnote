@@ -105,6 +105,20 @@ export function summarizeSyncReport(report: SyncReport): string {
   return parts.length ? parts.join(", ") : "không có gì thay đổi";
 }
 
+/**
+ * Chi tiết từng lỗi (path + lý do thật) — TRƯỚC ĐÂY cả Command thủ công lẫn
+ * auto-trigger chỉ hiện `summarizeSyncReport()` (chỉ có số lượng "1 lỗi",
+ * không có lý do), khiến người dùng không tự chẩn đoán được gì. Giới hạn số
+ * lỗi hiện ra để không tràn 1 thông báo toast quá dài khi nhiều file lỗi
+ * cùng lúc.
+ */
+export function summarizeSyncErrorDetails(report: SyncReport, max = 3): string {
+  if (report.errors.length === 0) return "";
+  const shown = report.errors.slice(0, max).map((e) => `${e.path}: ${e.error}`);
+  const more = report.errors.length > max ? ` (và ${report.errors.length - max} lỗi khác)` : "";
+  return shown.join(" | ") + more;
+}
+
 /** true nếu có gì đáng thông báo (khác "không có gì thay đổi") — auto-trigger
  * dùng để chạy êm, chỉ hiện notification khi thật sự có việc xảy ra. */
 export function syncReportIsNotable(report: SyncReport): boolean {

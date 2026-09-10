@@ -209,6 +209,28 @@ async function describeError(res: Response): Promise<string> {
   }
 }
 
+/**
+ * Dropbox yêu cầu header `Dropbox-API-Arg` chỉ chứa ASCII (đây là quy định
+ * chính thức của Dropbox — xem docs "HTTP header" — KHÔNG phải suy đoán) vì
+ * đây là 1 HTTP header, còn path có thể chứa ký tự có dấu (tiếng Việt,
+ * Catalan, ...). Dropbox tự unescape `\uXXXX` phía server, nên client phải tự
+ * escape TRƯỚC khi gửi. Thiếu bước này khiến chính Fetch API của trình
+ * duyệt throw ngay lúc set header — `TypeError: Failed to execute 'fetch'...
+ * String contains non ISO-8859-1 code point` — trước khi request kịp rời
+ * máy, nên lỗi này KHÔNG liên quan gì tới Dropbox/mạng, dễ chẩn đoán sai.
+ */
+const NON_ASCII_RE = new RegExp(
+  "[^" + String.fromCharCode(0) + "-" + String.fromCharCode(127) + "]",
+  "g",
+);
+
+export function toAsciiSafeHeaderJson(value: unknown): string {
+  return JSON.stringify(value).replace(
+    NON_ASCII_RE,
+    (ch) => "\\u" + ch.charCodeAt(0).toString(16).padStart(4, "0"),
+  );
+}
+
 export type DropboxWriteMode =
   | { tag: "add" }
   | { tag: "update"; rev: string }
@@ -240,7 +262,7 @@ export async function uploadFile(
 ): Promise<{ rev: string; serverModified: string }> {
   const res = await apiFetch(deps, `${CONTENT_ROOT}/files/upload`, {
     headers: {
-      "dropbox-api-arg": JSON.stringify({
+      "dropbox-api-arg": toAsciiSafeHeaderJson({
         path: dropboxPath,
         mode: modeArg(mode),
         autorename: false,
@@ -267,7 +289,7 @@ export async function downloadFile(
   dropboxPath: string,
 ): Promise<{ data: Uint8Array; rev: string; serverModified: string }> {
   const res = await apiFetch(deps, `${CONTENT_ROOT}/files/download`, {
-    headers: { "dropbox-api-arg": JSON.stringify({ path: dropboxPath }) },
+    headers: { "dropbox-api-arg": toAsciiSafeHeaderJson({ path: dropboxPath }) },
   });
   if (!res.ok) {
     throw new Error(

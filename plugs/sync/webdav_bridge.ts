@@ -4,7 +4,13 @@
 import { clientStore, config, editor } from "@silverbulletmd/silverbullet/syscalls";
 import type { WebDavAuth } from "./webdav_sync.ts";
 import { WebDavSyncProvider } from "./webdav_provider.ts";
-import { performSync, realSpaceOps, summarizeSyncReport, type SyncReport } from "./sync_engine.ts";
+import {
+  performSync,
+  realSpaceOps,
+  summarizeSyncErrorDetails,
+  summarizeSyncReport,
+  type SyncReport,
+} from "./sync_engine.ts";
 import { wrapProviderWithE2eeIfEnabled } from "./e2ee_bridge.ts";
 import { notifyCredentialsChanged } from "./push_trigger.ts";
 
@@ -106,7 +112,10 @@ export async function runWebDavSync(): Promise<SyncReport | null> {
     const baseProvider = new WebDavSyncProvider(auth);
     const provider = await wrapProviderWithE2eeIfEnabled(baseProvider);
     const report = await performSync(provider, folder, realSpaceOps);
-    await clientStore.set(LAST_SYNC_KEY, { at: Date.now() } satisfies LastSyncInfo);
+    await clientStore.set(LAST_SYNC_KEY, {
+      at: Date.now(),
+      error: report.errors.length ? summarizeSyncErrorDetails(report) : undefined,
+    } satisfies LastSyncInfo);
     return report;
   } catch (e) {
     await clientStore.set(LAST_SYNC_KEY, {
@@ -134,8 +143,9 @@ export async function commandWebDavSync() {
   try {
     const report = await runWebDavSync();
     if (!report) return; // đã kiểm tra url/auth ở trên, chỉ để TypeScript yên tâm
+    const detail = report.errors.length ? ` — ${summarizeSyncErrorDetails(report)}` : "";
     await editor.flashNotification(
-      `Đồng bộ WebDAV xong: ${summarizeSyncReport(report)}.`,
+      `Đồng bộ WebDAV xong: ${summarizeSyncReport(report)}.${detail}`,
       report.errors.length ? "warning" : "info",
     );
   } catch (e) {

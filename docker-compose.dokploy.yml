@@ -1,0 +1,39 @@
+services:
+  chessnote:
+    build:
+      context: .
+      dockerfile: Dockerfile.dokploy
+    image: chessnote:latest
+    container_name: chessnote
+    restart: unless-stopped
+    environment:
+      - SB_HOSTNAME=0.0.0.0
+      - SB_PORT=3000
+      - SB_FOLDER=/space
+      - CHROMIUM_PATH=/usr/bin/chromium-browser
+      - SB_USER=
+    volumes:
+      - chessnote-space:/space
+    networks:
+      - dokploy-network
+      - default
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.chessnote-web.rule=Host(chessnote.dsc.edu.vn)
+      - traefik.http.routers.chessnote-web.entrypoints=web
+      - traefik.http.routers.chessnote-web.middlewares=redirect-to-https@file
+      - traefik.http.routers.chessnote-web.service=chessnote-service
+      - traefik.http.routers.chessnote-websecure.rule=Host(chessnote.dsc.edu.vn)
+      - traefik.http.routers.chessnote-websecure.entrypoints=websecure
+      - traefik.http.routers.chessnote-websecure.tls.certresolver=letsencrypt
+      - traefik.http.routers.chessnote-websecure.service=chessnote-service
+      - traefik.http.services.chessnote-service.loadbalancer.server.port=3000
+
+volumes:
+  chessnote-space:
+    name: chessnote-space
+
+networks:
+  dokploy-network:
+    external: true

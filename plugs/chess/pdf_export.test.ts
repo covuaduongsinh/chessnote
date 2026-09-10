@@ -193,22 +193,22 @@ describe("renderPageForPdf", () => {
 
   test("defaults the board size to 400px when no size is given", async () => {
     const html = await renderPageForPdf("# No boards");
-    expect(html).toContain("max-width: 400px");
+    expect(html).toContain("width: 400px");
   });
 
   test("uses a custom board size when given", async () => {
     const html = await renderPageForPdf("# No boards", 250);
-    expect(html).toContain("max-width: 250px");
-    expect(html).not.toContain("max-width: 400px");
+    expect(html).toContain("width: 250px");
+    expect(html).not.toContain("width: 400px");
   });
 
   test("clamps a board size below the minimum", async () => {
     const html = await renderPageForPdf("# No boards", 10);
-    expect(html).toContain("max-width: 150px");
+    expect(html).toContain("width: 150px");
   });
 
   test("clamps a board size above the maximum", async () => {
     const html = await renderPageForPdf("# No boards", 5000);
-    expect(html).toContain("max-width: 700px");
+    expect(html).toContain("width: 700px");
   });
 });

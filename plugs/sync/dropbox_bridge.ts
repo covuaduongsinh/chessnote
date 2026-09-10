@@ -11,7 +11,13 @@ import {
   generateCodeVerifier,
 } from "./dropbox_sync.ts";
 import { DropboxSyncProvider } from "./dropbox_provider.ts";
-import { performSync, realSpaceOps, summarizeSyncReport, type SyncReport } from "./sync_engine.ts";
+import {
+  performSync,
+  realSpaceOps,
+  summarizeSyncErrorDetails,
+  summarizeSyncReport,
+  type SyncReport,
+} from "./sync_engine.ts";
 import { wrapProviderWithE2eeIfEnabled } from "./e2ee_bridge.ts";
 
 const TOKENS_KEY = "dropboxTokens";
@@ -140,7 +146,13 @@ export async function runDropboxSync(): Promise<SyncReport | null> {
     });
     const provider = await wrapProviderWithE2eeIfEnabled(baseProvider);
     const report = await performSync(provider, folder, realSpaceOps);
-    await clientStore.set(LAST_SYNC_KEY, { at: Date.now() } satisfies LastSyncInfo);
+    await clientStore.set(LAST_SYNC_KEY, {
+      at: Date.now(),
+      // performSync KHÔNG throw cho lỗi từng file riêng lẻ (report.errors) —
+      // vẫn cần ghi lại ở đây, không thì "Chess: Trạng thái đồng bộ" sẽ báo
+      // "không có lỗi" dù rõ ràng có 1 file lỗi trong report.
+      error: report.errors.length ? summarizeSyncErrorDetails(report) : undefined,
+    } satisfies LastSyncInfo);
     return report;
   } catch (e) {
     await clientStore.set(LAST_SYNC_KEY, {
@@ -168,8 +180,9 @@ export async function commandDropboxSync() {
   try {
     const report = await runDropboxSync();
     if (!report) return; // đã kiểm tra appKey/tokens ở trên, chỉ để TypeScript yên tâm
+    const detail = report.errors.length ? ` — ${summarizeSyncErrorDetails(report)}` : "";
     await editor.flashNotification(
-      `Đồng bộ Dropbox xong: ${summarizeSyncReport(report)}.`,
+      `Đồng bộ Dropbox xong: ${summarizeSyncReport(report)}.${detail}`,
       report.errors.length ? "warning" : "info",
     );
   } catch (e) {
