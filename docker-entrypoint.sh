@@ -16,6 +16,11 @@ if [ -z "$PGID" ]; then
     PGID=$(stat -c "%g" "$SB_FOLDER")
 fi
 
+# Clean up any stale Chrome profile locks or temp sockets
+rm -rf /space/.chrome-data/Singleton* /tmp/chrome-data /tmp/.org.chromium.Chromium* /tmp/org.chromium.Chromium* /tmp/.com.google.Chrome*
+mkdir -p "${SB_CHROME_DATA_DIR:-/tmp/chrome-data}"
+chmod 777 "${SB_CHROME_DATA_DIR:-/tmp/chrome-data}" 2>/dev/null || true
+
 if [ "$PUID" == "0" ] || [ "$UID" != "0" ]; then
     # Will run SilverBullet as default user
     /silverbullet $@

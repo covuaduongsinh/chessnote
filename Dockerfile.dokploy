@@ -43,12 +43,13 @@ RUN cargo build --release -p silverbullet
 # ==============================================================================
 FROM alpine:latest
 
-RUN apk add --no-cache git curl bash tini openssh-client chromium
+RUN apk add --no-cache git curl bash tini openssh-client chromium ttf-dejavu font-noto font-noto-cjk font-noto-emoji
 
 ENV SB_HOSTNAME=0.0.0.0 \
     SB_FOLDER=/space \
     SB_PORT=3000 \
-    CHROMIUM_PATH=/usr/bin/chromium-browser
+    CHROMIUM_PATH=/usr/bin/chromium-browser \
+    SB_CHROME_DATA_DIR=/tmp/chrome-data
 
 EXPOSE 3000
 

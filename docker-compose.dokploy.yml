@@ -11,6 +11,7 @@ services:
       - SB_PORT=3000
       - SB_FOLDER=/space
       - CHROMIUM_PATH=/usr/bin/chromium-browser
+      - SB_CHROME_DATA_DIR=/tmp/chrome-data
       - SB_USER=
     volumes:
       - chessnote-space:/space
