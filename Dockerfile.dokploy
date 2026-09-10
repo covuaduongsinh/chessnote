@@ -14,7 +14,7 @@ COPY plug-api ./plug-api
 COPY plugs ./plugs
 COPY libraries ./libraries
 COPY build ./build
-COPY version.ts version.json ./
+COPY version.ts ./
 
 RUN npm run build
 
@@ -32,7 +32,8 @@ COPY server ./server
 COPY server-runtime-chrome ./server-runtime-chrome
 COPY server-merge ./server-merge
 COPY bin ./bin
-COPY version.json version.ts ./
+COPY version.ts ./
+COPY --from=frontend-builder /app/version.json ./version.json
 COPY --from=frontend-builder /app/client_bundle ./client_bundle
 
 RUN cargo build --release -p silverbullet
