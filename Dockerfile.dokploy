@@ -53,7 +53,7 @@ ENV SB_HOSTNAME=0.0.0.0 \
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD curl --fail "http://localhost:/.instance" || exit 1
+  CMD curl --fail "http://127.0.0.1:3000/.instance" || exit 1
 
 # Wipe stock Alpine accounts so docker-entrypoint.sh can handle arbitrary PUID/PGID
 RUN echo "" > /etc/group && echo "root:x:0:0:root:/root:/bin/sh" > /etc/passwd

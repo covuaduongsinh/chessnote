@@ -17,14 +17,20 @@ services:
     networks:
       - dokploy-network
       - default
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:3000/.instance"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     labels:
       - traefik.enable=true
       - traefik.docker.network=dokploy-network
-      - traefik.http.routers.chessnote-web.rule=Host(chessnote.dsc.edu.vn)
+      - "traefik.http.routers.chessnote-web.rule=Host(chessnote.dsc.edu.vn)"
       - traefik.http.routers.chessnote-web.entrypoints=web
       - traefik.http.routers.chessnote-web.middlewares=redirect-to-https@file
       - traefik.http.routers.chessnote-web.service=chessnote-service
-      - traefik.http.routers.chessnote-websecure.rule=Host(chessnote.dsc.edu.vn)
+      - "traefik.http.routers.chessnote-websecure.rule=Host(chessnote.dsc.edu.vn)"
       - traefik.http.routers.chessnote-websecure.entrypoints=websecure
       - traefik.http.routers.chessnote-websecure.tls.certresolver=letsencrypt
       - traefik.http.routers.chessnote-websecure.service=chessnote-service
