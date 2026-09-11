@@ -20,11 +20,20 @@ export type PanelConfig = {
   script?: string;
 };
 
+export type DocumentTab = {
+  path: Path;
+  title: string;
+  pinned?: boolean;
+  lastActive?: number;
+};
+
 export type AppViewState = {
   current?: {
     path: Path;
     meta: PageMeta | DocumentMeta;
   };
+
+  tabs: DocumentTab[];
 
   allPages: PageMeta[];
 
@@ -71,6 +80,7 @@ export const initialViewState: AppViewState = {
   isLoading: false,
   unsavedChanges: false,
   isOnline: true,
+  tabs: [],
   uiOptions: {
     vimMode: false,
     darkMode: undefined,
@@ -107,6 +117,10 @@ export type Action =
   | { type: "document-editor-loaded"; path: Path; meta: DocumentMeta }
   | { type: "document-editor-changed" }
   | { type: "document-editor-saved" }
+  | { type: "set-tabs"; tabs: DocumentTab[] }
+  | { type: "close-tab"; path: Path }
+  | { type: "pin-tab"; path: Path }
+  | { type: "reorder-tabs"; tabs: DocumentTab[] }
   | { type: "online-status-change"; isOnline: boolean }
   | { type: "update-current-page-meta"; meta: PageMeta }
   | { type: "update-page-list"; allPages: PageMeta[] }

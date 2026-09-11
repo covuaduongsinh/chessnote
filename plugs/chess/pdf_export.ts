@@ -2,11 +2,19 @@ import { Chess } from "chess.js";
 import {
   collectNodesOfType,
   findNodeOfType,
+  renderToText,
   type ParseTree,
 } from "@silverbulletmd/silverbullet/lib/tree";
 import { markdown } from "@silverbulletmd/silverbullet/syscalls";
 import { CHESS_CSS, renderStaticBoardHtml } from "./board_renderer.ts";
 import { buildMoveList, type MoveListEntry } from "./engine/game_reviewer.ts";
+import {
+  type BoardMeta,
+  computeColumnGeometry,
+  estimateBoardHeightPx,
+  estimateTextHeightPx,
+  paginateUnits,
+} from "./pdf_pagination.ts";
 
 const DEFAULT_BOARD_SIZE = 400;
 const MIN_BOARD_SIZE = 150;
@@ -18,7 +26,9 @@ const MAX_BOARD_SIZE = 700;
  * a printed page is not, and doesn't carry a `data-theme` attribute to key
  * off of either. Overrides those to a plain light/paper scheme, plus the two
  * classes this module's own output uses that `CHESS_CSS` doesn't define
- * (`.chessnote-static-board`'s sizing, `.chess-pgn-movetext`'s typography).
+ * (`.chessnote-static-board`'s sizing, `.chess-pgn-movetext`'s typography),
+ * plus the `.pdf-page`/`.pdf-col` layout `renderPageForPdf` assembles pages
+ * into (see `pdf_pagination.ts` for why this replaced CSS `column-count`).
  *
  * `boardSize` (px) controls `.chessnote-static-board`'s `max-width` — the
  * caller (`renderPageForPdf`) clamps it before it ever reaches here.
@@ -30,6 +40,22 @@ function buildPdfExtraCss(boardSize: number): string {
   --text-main: #111111;
   --text-muted: #555555;
   --board-border: #78350f;
+}
+.pdf-page {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 24px;
+  break-after: page;
+  page-break-after: always;
+}
+.pdf-page:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+.pdf-col {
+  flex: 1 1 0;
+  min-width: 0;
 }
 .chessnote-static-board {
   width: 100%;
@@ -69,8 +95,6 @@ function buildPdfExtraCss(boardSize: number): string {
 }
 .chessnote-static-board .chess-sq {
   width: 100% !important;
-  height: auto !important;
-  aspect-ratio: 1 / 1 !important;
   box-sizing: border-box;
   display: flex;
   align-items: center;
@@ -130,8 +154,13 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#039;");
 }
 
+interface BoardRender {
+  html: string;
+  meta: BoardMeta;
+}
+
 /** `fen` block body: first line is the FEN, optional `| key: value` lines follow (see `fenWidget`). */
-function renderFenBlockForPdf(bodyText: string): string {
+function renderFenBlockForPdf(bodyText: string): BoardRender {
   const lines = bodyText.trim().split("\n");
   const fen = lines[0]?.trim() ?? "";
   let title = "";
@@ -144,11 +173,21 @@ function renderFenBlockForPdf(bodyText: string): string {
       orientation = line.includes("black") ? "black" : "white";
     }
   }
-  return renderStaticBoardHtml(fen, { title, orientation, showFen: false });
+  const html = renderStaticBoardHtml(fen, { title, orientation, showFen: false });
+  return {
+    html,
+    meta: {
+      hasTitle: title.length > 0,
+      titleLength: title.length,
+      movetextLength: 0,
+      hintLength: 0,
+      isError: !html.includes("chessnote-static-board"),
+    },
+  };
 }
 
 /** `puzzle` block body: `key: value` lines (see `puzzleWidget`) — only `fen`/`hint` matter for a static print. */
-function renderPuzzleBlockForPdf(bodyText: string): string {
+function renderPuzzleBlockForPdf(bodyText: string): BoardRender {
   const lines = bodyText.trim().split("\n");
   let fen = "";
   let hint = "";
@@ -160,11 +199,22 @@ function renderPuzzleBlockForPdf(bodyText: string): string {
       hint = trimmed.replace("hint:", "").trim();
     }
   }
-  const board = renderStaticBoardHtml(fen, { title: "Bài tập cờ", showFen: false });
-  const hintHtml = hint
+  const title = "Bài tập cờ";
+  const board = renderStaticBoardHtml(fen, { title, showFen: false });
+  const isError = !board.includes("chessnote-static-board");
+  const hintHtml = !isError && hint
     ? `<div class="puzzle-hint-box">Gợi ý: ${escapeHtml(hint)}</div>`
     : "";
-  return `${board}${hintHtml}`;
+  return {
+    html: `${board}${hintHtml}`,
+    meta: {
+      hasTitle: !isError,
+      titleLength: title.length,
+      movetextLength: 0,
+      hintLength: hintHtml ? hint.length : 0,
+      isError,
+    },
+  };
 }
 
 const START_POSITION_FEN =
@@ -225,7 +275,7 @@ function resolveDisplayMove(
  * (see `resolveDisplayMove`), in which case the board shows that position and
  * the title notes which move it is.
  */
-function renderPgnBlockForPdf(bodyText: string): string {
+function renderPgnBlockForPdf(bodyText: string): BoardRender {
   const trimmedPgn = bodyText.trim();
   let chess: Chess;
   try {
@@ -234,9 +284,19 @@ function renderPgnBlockForPdf(bodyText: string): string {
       chess.loadPgn(trimmedPgn);
     }
   } catch (e) {
-    return `<div class="chess-error-banner">PGN không hợp lệ: ${
+    const html = `<div class="chess-error-banner">PGN không hợp lệ: ${
       e instanceof Error ? escapeHtml(e.message) : ""
     }</div>`;
+    return {
+      html,
+      meta: {
+        hasTitle: false,
+        titleLength: 0,
+        movetextLength: 0,
+        hintLength: 0,
+        isError: true,
+      },
+    };
   }
 
   const header = chess.header();
@@ -254,8 +314,9 @@ function renderPgnBlockForPdf(bodyText: string): string {
 
   const displayMove = resolveDisplayMove(moves, header["DisplayMove"] ?? undefined);
   const titleSuffix = displayMove ? ` — ${displayMove.label}` : "";
+  const title = `${white} vs ${black} (${result})${titleSuffix}`;
   const board = renderStaticBoardHtml(displayMove?.entry.fenAfter ?? START_POSITION_FEN, {
-    title: `${white} vs ${black} (${result})${titleSuffix}`,
+    title,
     showFen: false,
   });
 
@@ -263,16 +324,49 @@ function renderPgnBlockForPdf(bodyText: string): string {
   for (const move of moves) {
     movetext += move.isWhite ? `${move.moveNum}. ${move.san} ` : `${move.san} `;
   }
-  return `${board}<div class="chess-pgn-movetext">${escapeHtml(movetext.trim())}</div>`;
+  const movetextTrimmed = movetext.trim();
+  const html = `${board}<div class="chess-pgn-movetext">${escapeHtml(movetextTrimmed)}</div>`;
+  return {
+    html,
+    meta: {
+      hasTitle: true,
+      titleLength: title.length,
+      movetextLength: movetextTrimmed.length,
+      hintLength: 0,
+      isError: false,
+    },
+  };
 }
 
+function fenceLang(node: ParseTree): string | undefined {
+  if (node.type !== "FencedCode") return undefined;
+  const codeInfoNode = findNodeOfType(node, "CodeInfo");
+  return codeInfoNode?.children?.[0]?.text;
+}
+
+function renderFenceForPdf(node: ParseTree, lang: string): BoardRender {
+  const codeTextNode = findNodeOfType(node, "CodeText");
+  const body = codeTextNode?.children?.[0]?.text ?? "";
+  return lang === "fen"
+    ? renderFenBlockForPdf(body)
+    : lang === "pgn"
+    ? renderPgnBlockForPdf(body)
+    : renderPuzzleBlockForPdf(body);
+}
+
+type PdfBlock =
+  | { kind: "board"; html: string; estHeight: number }
+  | { kind: "text"; markdownSrc: string; estHeight: number };
+
 /**
- * Turns page markdown into print-ready HTML: every `fen`/`pgn`/`puzzle` code
- * fence is replaced with a static, non-interactive board rendering (see
- * `board_renderer.ts`) before handing the rest to `markdown.markdownToHtml` —
- * that pipeline has no special handling for these fences (codeWidget
- * rendering only exists in the live editor's iframe path) and would
- * otherwise emit a bare `<pre><code>` block of raw FEN/PGN/puzzle text.
+ * Turns page markdown into a print-ready, pre-paginated HTML document: every
+ * `fen`/`pgn`/`puzzle` code fence becomes a static, non-interactive board
+ * rendering (see `board_renderer.ts`), and the page's top-level blocks
+ * (headings, paragraphs, boards, etc.) are greedily packed into `columns`
+ * columns per physical page (see `pdf_pagination.ts`) using estimated block
+ * heights — *not* the browser's own CSS `column-count`, which doesn't
+ * reliably keep a board from being split across a page boundary once nested
+ * inside print pagination (see `pdf_pagination.ts`'s module doc).
  *
  * Called by the "PDF: Xuất file PDF" exporter in
  * `Library/Std/Infrastructure/Export.md`, which then hands the result to
@@ -282,42 +376,129 @@ function renderPgnBlockForPdf(bodyText: string): string {
  * static board renders — clamped to [{@link MIN_BOARD_SIZE},
  * {@link MAX_BOARD_SIZE}] so a bad config/frontmatter value can't shrink
  * boards past legibility or blow past a single PDF column's width.
+ * `columns` (1 or 2, default 2) sets how many columns each physical page has.
  */
 export async function renderPageForPdf(
   text: string,
   boardSize?: number,
+  columns?: number,
 ): Promise<string> {
   const clampedBoardSize = Math.min(
     MAX_BOARD_SIZE,
     Math.max(MIN_BOARD_SIZE, boardSize ?? DEFAULT_BOARD_SIZE),
   );
-  const tree = (await markdown.parseMarkdown(text)) as ParseTree;
-  const replacements: { from: number; to: number; html: string }[] = [];
+  const resolvedColumns: 1 | 2 = columns === 1 ? 1 : 2;
+  const { colWidthPx, colBudgetPx } = computeColumnGeometry(resolvedColumns);
 
+  const tree = (await markdown.parseMarkdown(text)) as ParseTree;
+
+  // All fen/pgn/puzzle fences anywhere in the tree (matches the fence's own
+  // static-board render to its node) — usually top-level, but a fence nested
+  // inside e.g. a blockquote/list is still converted, just not given its own
+  // atomic page/column placement (see the fallback branch below).
+  const boardByNode = new Map<ParseTree, BoardRender>();
   for (const node of collectNodesOfType(tree, "FencedCode")) {
-    const codeInfoNode = findNodeOfType(node, "CodeInfo");
-    if (!codeInfoNode) continue;
-    const lang = codeInfoNode.children![0].text!;
+    const lang = fenceLang(node);
     if (lang !== "fen" && lang !== "pgn" && lang !== "puzzle") continue;
-    const codeTextNode = findNodeOfType(node, "CodeText");
-    const body = codeTextNode?.children?.[0]?.text ?? "";
+    boardByNode.set(node, renderFenceForPdf(node, lang));
+  }
+
+  const blocks: PdfBlock[] = [];
+  for (const node of tree.children ?? []) {
     if (node.from == null || node.to == null) continue;
 
-    const html = lang === "fen"
-      ? renderFenBlockForPdf(body)
-      : lang === "pgn"
-      ? renderPgnBlockForPdf(body)
-      : renderPuzzleBlockForPdf(body);
-    replacements.push({ from: node.from, to: node.to, html });
+    const directBoard = boardByNode.get(node);
+    if (directBoard) {
+      blocks.push({
+        kind: "board",
+        html: directBoard.html,
+        estHeight: estimateBoardHeightPx(clampedBoardSize, directBoard.meta),
+      });
+      continue;
+    }
+
+    const nestedBoardNodes = collectNodesOfType(node, "FencedCode").filter((n) =>
+      boardByNode.has(n)
+    );
+    if (nestedBoardNodes.length === 0) {
+      blocks.push({
+        kind: "text",
+        markdownSrc: text.slice(node.from, node.to),
+        estHeight: estimateTextHeightPx(node.type, renderToText(node), colWidthPx),
+      });
+      continue;
+    }
+
+    // A fen/pgn/puzzle fence nested inside this top-level node (e.g. a
+    // blockquote) — splice its board HTML into just this node's own source
+    // range (same back-to-front splice technique as a plain fence
+    // replacement, scoped) and treat the whole node as one text unit; it
+    // still gets a static board, just not this module's atomic
+    // never-split-across-a-column placement (only the CSS break-inside
+    // fallback), since column-fill is per top-level node.
+    const replacements = nestedBoardNodes
+      .map((n) => ({ from: n.from!, to: n.to!, html: boardByNode.get(n)!.html }))
+      .sort((a, b) => b.from - a.from);
+    let spliced = text.slice(node.from, node.to);
+    for (const r of replacements) {
+      spliced = spliced.slice(0, r.from - node.from) + r.html +
+        spliced.slice(r.to - node.from);
+    }
+    let estHeight = estimateTextHeightPx(node.type, renderToText(node), colWidthPx);
+    for (const n of nestedBoardNodes) {
+      estHeight += estimateBoardHeightPx(clampedBoardSize, boardByNode.get(n)!.meta);
+    }
+    blocks.push({ kind: "text", markdownSrc: spliced, estHeight });
   }
 
-  // Splice back-to-front so earlier offsets stay valid as the string shrinks/grows.
-  replacements.sort((a, b) => b.from - a.from);
-  let spliced = text;
-  for (const r of replacements) {
-    spliced = spliced.slice(0, r.from) + r.html + spliced.slice(r.to);
+  const placed = paginateUnits(blocks, resolvedColumns, colBudgetPx);
+
+  // Render each block's HTML — boards are already static HTML; consecutive
+  // text blocks landing in the same (page, col) slot are batched into one
+  // `markdownToHtml` call (joined by a blank line, same as adjacent markdown
+  // blocks in the original source) rather than one call per block.
+  const renderedHtml: string[] = new Array(placed.length).fill("");
+  let i = 0;
+  while (i < placed.length) {
+    const cur = placed[i];
+    if (cur.kind === "board") {
+      renderedHtml[i] = cur.html;
+      i++;
+      continue;
+    }
+    const srcs: string[] = [cur.markdownSrc];
+    let j = i + 1;
+    while (j < placed.length) {
+      const next = placed[j];
+      if (next.kind !== "text" || next.page !== cur.page || next.col !== cur.col) break;
+      srcs.push(next.markdownSrc);
+      j++;
+    }
+    renderedHtml[i] = (await markdown.markdownToHtml(
+      srcs.join("\n\n"),
+    )) as unknown as string;
+    i = j;
   }
 
-  const bodyHtml = (await markdown.markdownToHtml(spliced)) as unknown as string;
+  // Assemble `.pdf-page` > `.pdf-col` divs in (page, col) order.
+  const pageCols: string[][] = [];
+  for (let idx = 0; idx < placed.length; idx++) {
+    const p = placed[idx];
+    if (!pageCols[p.page]) {
+      pageCols[p.page] = resolvedColumns === 1 ? [""] : ["", ""];
+    }
+    pageCols[p.page][p.col] += renderedHtml[idx];
+  }
+
+  let bodyHtml = "";
+  for (const cols of pageCols) {
+    if (!cols) continue;
+    bodyHtml += `<div class="pdf-page">`;
+    for (const colHtml of cols) {
+      bodyHtml += `<div class="pdf-col">${colHtml}</div>`;
+    }
+    bodyHtml += `</div>`;
+  }
+
   return `<style>${CHESS_CSS}${buildPdfExtraCss(clampedBoardSize)}</style>${bodyHtml}`;
 }

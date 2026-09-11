@@ -689,4 +689,63 @@ export function registerEditorCommands(
       client.focus();
     },
   });
+
+  // Tab management commands
+  hook.registerCommand({
+    name: "Tabs: Next Tab",
+    key: "Alt-]",
+    mac: "Alt-]",
+    run: async () => {
+      const tabs = client.ui.viewState.tabs || [];
+      const currentPath = client.ui.viewState.current?.path;
+      if (tabs.length <= 1 || !currentPath) return;
+      const currentIndex = tabs.findIndex((t) => t.path === currentPath);
+      const nextIndex = (currentIndex + 1) % tabs.length;
+      await client.navigate({ path: tabs[nextIndex].path });
+    },
+  });
+
+  hook.registerCommand({
+    name: "Tabs: Previous Tab",
+    key: "Alt-[",
+    mac: "Alt-[",
+    run: async () => {
+      const tabs = client.ui.viewState.tabs || [];
+      const currentPath = client.ui.viewState.current?.path;
+      if (tabs.length <= 1 || !currentPath) return;
+      const currentIndex = tabs.findIndex((t) => t.path === currentPath);
+      const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      await client.navigate({ path: tabs[prevIndex].path });
+    },
+  });
+
+  hook.registerCommand({
+    name: "Tabs: Close Current Tab",
+    key: "Alt-w",
+    mac: "Alt-w",
+    run: async () => {
+      const tabs = client.ui.viewState.tabs || [];
+      const currentPath = client.ui.viewState.current?.path;
+      if (!currentPath || tabs.length === 0) return;
+      const remainingTabs = tabs.filter((t) => t.path !== currentPath);
+      client.ui.viewDispatch({ type: "close-tab", path: currentPath });
+      if (remainingTabs.length > 0) {
+        const nextTab = remainingTabs[remainingTabs.length - 1];
+        await client.navigate({ path: nextTab.path });
+      } else {
+        await client.navigate({ path: client.getIndexRef().path });
+      }
+    },
+  });
+
+  hook.registerCommand({
+    name: "Tabs: Close Other Tabs",
+    run: async () => {
+      const tabs = client.ui.viewState.tabs || [];
+      const currentPath = client.ui.viewState.current?.path;
+      if (!currentPath) return;
+      const keptTabs = tabs.filter((t) => t.path === currentPath || t.pinned);
+      client.ui.viewDispatch({ type: "set-tabs", tabs: keptTabs });
+    },
+  });
 }

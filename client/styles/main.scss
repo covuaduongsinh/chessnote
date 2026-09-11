@@ -4,6 +4,7 @@
 @use "theme";
 @use "colors";
 @use "top";
+@use "tab_bar";
 @use "xray";
 @use "components";
 // After `components`: the shared `.sb-nav-*` rules live there, and the

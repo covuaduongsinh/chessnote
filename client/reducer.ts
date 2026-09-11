@@ -1,10 +1,33 @@
-import type { Action, AppViewState } from "./types/ui.ts";
-import type { PageMeta } from "../plug-api/types/index.ts";
 import {
+  getNameFromPath,
   isMarkdownPath,
+  type Path,
   parseToRef,
 } from "@silverbulletmd/silverbullet/lib/ref";
+import type { PageMeta } from "../plug-api/types/index.ts";
 import { isMobileDevice } from "./lib/mobile.ts";
+import type { Action, AppViewState, DocumentTab } from "./types/ui.ts";
+
+function updateTabsOnLoad(
+  tabs: DocumentTab[] | undefined,
+  path: Path,
+): DocumentTab[] {
+  const currentTabs = tabs || [];
+  const existing = currentTabs.find((t) => t.path === path);
+  if (existing) {
+    return currentTabs.map((t) =>
+      t.path === path ? { ...t, lastActive: Date.now() } : t,
+    );
+  }
+  return [
+    ...currentTabs,
+    {
+      path,
+      title: getNameFromPath(path),
+      lastActive: Date.now(),
+    },
+  ];
+}
 
 export default function reducer(
   state: AppViewState,
@@ -15,20 +38,21 @@ export default function reducer(
       return {
         ...state,
         isLoading: false,
+        tabs: updateTabsOnLoad(state.tabs, action.path),
         current: {
           path: action.path,
           meta: action.meta,
         },
       };
     case "page-loaded": {
-      const isBrowser = globalThis.matchMedia(
-        "(display-mode: browser)",
-      ).matches;
+      const isBrowser =
+        globalThis.matchMedia?.("(display-mode: browser)")?.matches ?? true;
       return {
         ...state,
         isLoading: false,
         isMobile: isMobileDevice(),
         isStandalone: !isBrowser,
+        tabs: updateTabsOnLoad(state.tabs, action.path),
         current: {
           path: action.path,
           meta: action.meta as PageMeta,
@@ -48,6 +72,28 @@ export default function reducer(
         unsavedChanges: false,
       };
     }
+    case "set-tabs":
+      return {
+        ...state,
+        tabs: action.tabs,
+      };
+    case "close-tab":
+      return {
+        ...state,
+        tabs: (state.tabs || []).filter((t) => t.path !== action.path),
+      };
+    case "pin-tab":
+      return {
+        ...state,
+        tabs: (state.tabs || []).map((t) =>
+          t.path === action.path ? { ...t, pinned: !t.pinned } : t,
+        ),
+      };
+    case "reorder-tabs":
+      return {
+        ...state,
+        tabs: action.tabs,
+      };
     case "update-current-page-meta": {
       state.allPages = state.allPages.map((pageMeta) =>
         pageMeta.name === action.meta.name

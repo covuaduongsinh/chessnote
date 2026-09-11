@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { PageMeta } from "../plug-api/types/index.ts";
-import type { Action, AppViewState } from "./types/ui.ts";
 import reducer from "./reducer.ts";
+import type { Action, AppViewState } from "./types/ui.ts";
 
 function pageMeta(name: string, extra: Partial<PageMeta> = {}): PageMeta {
   return {
@@ -69,5 +69,69 @@ describe("update-page-list current page meta matching", () => {
     } as unknown as AppViewState;
     const next = updatePageList(state, [pageMeta("foo")]);
     expect(next.allPages[0].lastOpened).toBe(42);
+  });
+});
+
+describe("Document tabs reducer management", () => {
+  test("page-loaded adds new tab if not already open", () => {
+    const state = {
+      tabs: [],
+      allPages: [],
+    } as unknown as AppViewState;
+    const next = reducer(state, {
+      type: "page-loaded",
+      path: "DocA.md" as any,
+      meta: pageMeta("DocA"),
+    });
+    expect(next.tabs).toHaveLength(1);
+    expect(next.tabs[0].path).toBe("DocA.md");
+    expect(next.tabs[0].title).toBe("DocA");
+  });
+
+  test("page-loaded updates existing tab lastActive timestamp without duplicating", () => {
+    const state = {
+      tabs: [{ path: "DocA.md", title: "DocA", lastActive: 100 }],
+      allPages: [],
+    } as unknown as AppViewState;
+    const next = reducer(state, {
+      type: "page-loaded",
+      path: "DocA.md" as any,
+      meta: pageMeta("DocA"),
+    });
+    expect(next.tabs).toHaveLength(1);
+    expect(next.tabs[0].lastActive).toBeGreaterThan(100);
+  });
+
+  test("close-tab removes specified tab", () => {
+    const state = {
+      tabs: [
+        { path: "DocA.md", title: "DocA" },
+        { path: "DocB.md", title: "DocB" },
+      ],
+      allPages: [],
+    } as unknown as AppViewState;
+    const next = reducer(state, {
+      type: "close-tab",
+      path: "DocA.md" as any,
+    });
+    expect(next.tabs).toHaveLength(1);
+    expect(next.tabs[0].path).toBe("DocB.md");
+  });
+
+  test("pin-tab toggles pinned status", () => {
+    const state = {
+      tabs: [{ path: "DocA.md", title: "DocA", pinned: false }],
+      allPages: [],
+    } as unknown as AppViewState;
+    const next = reducer(state, {
+      type: "pin-tab",
+      path: "DocA.md" as any,
+    });
+    expect(next.tabs[0].pinned).toBe(true);
+    const unpinned = reducer(next, {
+      type: "pin-tab",
+      path: "DocA.md" as any,
+    });
+    expect(unpinned.tabs[0].pinned).toBe(false);
   });
 });

@@ -10,29 +10,30 @@ import { notificationDismissTimeouts } from "@silverbulletmd/silverbullet/type/c
 import { h, render as preactRender } from "preact";
 import { useEffect, useMemo, useReducer, useState } from "preact/hooks";
 import * as featherIcons from "preact-feather";
-import type { Client } from "./client.ts";
+import { isMacLike, keyboardHint } from "../plug-api/lib/shortcut.ts";
 import {
   type ConfiguredActionButton,
   visibleActionButtons,
 } from "./action_buttons.ts";
-import { Confirm, Prompt } from "./components/basic_modals.tsx";
-import { isMacLike, keyboardHint } from "../plug-api/lib/shortcut.ts";
-import { kebabToPascal } from "./lib/feather_icons.ts";
-import { FilterList } from "./components/filter.tsx";
-import { NavigatorDock, NavigatorModal } from "./navigator/ui/panels.tsx";
-import { RevisionPreviewModal } from "./navigator/ui/components/revision_preview.tsx";
-import { useNavigatorSlot } from "./navigator/ui/slots.ts";
-import { Panel } from "./components/panel.tsx";
-import { TopBar } from "./components/top_bar.tsx";
+import type { Client } from "./client.ts";
 import { AnchoredMenu } from "./components/anchored_menu.tsx";
+import { Confirm, Prompt } from "./components/basic_modals.tsx";
+import { FilterList } from "./components/filter.tsx";
+import { Panel } from "./components/panel.tsx";
 import {
   ProfileAvatar,
   profileMenuHeader,
   profileMenuItems,
   profileMenuLabel,
 } from "./components/profile_button.tsx";
-import { loadProfile, type ProfileState } from "./profile.ts";
+import { DocumentTabBar } from "./components/tab_bar.tsx";
+import { TopBar } from "./components/top_bar.tsx";
 import * as mdi from "./filtered_material_icons.ts";
+import { kebabToPascal } from "./lib/feather_icons.ts";
+import { RevisionPreviewModal } from "./navigator/ui/components/revision_preview.tsx";
+import { NavigatorDock, NavigatorModal } from "./navigator/ui/panels.tsx";
+import { useNavigatorSlot } from "./navigator/ui/slots.ts";
+import { loadProfile, type ProfileState } from "./profile.ts";
 import reducer from "./reducer.ts";
 import {
   type Action,
@@ -663,6 +664,45 @@ export class MainUI {
             onClose={() => setMenuTrigger(undefined)}
           />
         )}
+        <DocumentTabBar
+          tabs={viewState.tabs}
+          activeTabPath={viewState.current?.path}
+          unsavedChanges={viewState.unsavedChanges}
+          lhsSpacer={sidebarSpacer("lhs")}
+          rhsSpacer={sidebarSpacer("rhs")}
+          onSelectTab={(tab) => {
+            void client.navigate({ path: tab.path });
+          }}
+          onCloseTab={(tab) => {
+            const remainingTabs = (viewState.tabs || []).filter(
+              (t) => t.path !== tab.path,
+            );
+            dispatch({ type: "close-tab", path: tab.path });
+            if (viewState.current?.path === tab.path) {
+              if (remainingTabs.length > 0) {
+                const nextTab = remainingTabs[remainingTabs.length - 1];
+                void client.navigate({ path: nextTab.path });
+              } else {
+                void client.navigate({ path: client.getIndexRef().path });
+              }
+            }
+          }}
+          onPinTab={(tab) => {
+            dispatch({ type: "pin-tab", path: tab.path });
+          }}
+          onCloseOtherTabs={(tab) => {
+            const keptTabs = (viewState.tabs || []).filter(
+              (t) => t.path === tab.path || t.pinned,
+            );
+            dispatch({ type: "set-tabs", tabs: keptTabs });
+            if (viewState.current?.path !== tab.path) {
+              void client.navigate({ path: tab.path });
+            }
+          }}
+          onNewTab={() => {
+            void client.startPageNavigate("page");
+          }}
+        />
         <div id="sb-main">
           <NavigatorDock slot="lhs" state={navSlots.lhs} client={client} />
           {viewState.panels.lhs.mode !== undefined && (

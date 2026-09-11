@@ -91,7 +91,7 @@ service.define {
 ```
 
 # PDF exporter
-Renders the page to a print-ready PDF: chess boards (`fen`/`pgn`/`puzzle` blocks) as static images instead of the live interactive iframe (with no raw FEN text printed underneath — the board already shows the position), and automatic page numbers. Default column layout is 2 columns and default board size is 400px (both configurable via `pdfExport.columns`/`pdfExport.boardSize` in `CONFIG.md` or the Configuration Manager). `column-fill: auto` keeps the first column filled to the page's actual full height before spilling into the second, so a board (`break-inside: avoid`, see `plugs/chess/pdf_export.ts`) that has real room left in the current column stays there instead of jumping over and leaving that room blank; only when the board genuinely doesn't fit what's left of the column does it still move to the next one (or, for a particularly board-heavy page, 1 column and/or a smaller board size reads better and also saves paper when printing). Add `pdfColumns: 1|2` and/or `pdfBoardSize: <px>` to a page's frontmatter to override either default for that one page. The board rendering lives in the `chess` plug (`chess.renderPageForPdf`, see `plugs/chess/pdf_export.ts`) since it needs `chess.js`; the actual PDF rendering (headless Chrome — the server's `/.export/pdf`, or the desktop app's own `export_pdf` Tauri command) lives behind `editor.exportPdf`, which also picks whichever of those two the current environment has.
+Renders the page to a print-ready PDF: chess boards (`fen`/`pgn`/`puzzle` blocks) as static images instead of the live interactive iframe (with no raw FEN text printed underneath — the board already shows the position), and automatic page numbers. Default column layout is 2 columns and default board size is 400px (both configurable via `pdfExport.columns`/`pdfExport.boardSize` in `CONFIG.md` or the Configuration Manager). Pagination is pre-computed server-side by `chess.renderPageForPdf` (see `plugs/chess/pdf_pagination.ts`) rather than left to a CSS `column-count` layout: Chrome's print-to-PDF doesn't reliably honor `break-inside: avoid` for an element inside a CSS multi-column layout that's *also* being fragmented into physical pages (a known Chromium limitation with nested fragmentation contexts), so each physical page's column(s) are assembled ahead of time from estimated block heights, guaranteeing a board never gets split across a page even though column heights are no longer perfectly balanced the way native `column-fill: auto` used to make them (for a particularly board-heavy page, 1 column and/or a smaller board size still reads better and also saves paper when printing). Add `pdfColumns: 1|2` and/or `pdfBoardSize: <px>` to a page's frontmatter to override either default for that one page. The board rendering and pagination live in the `chess` plug (`chess.renderPageForPdf`, see `plugs/chess/pdf_export.ts`/`pdf_pagination.ts`) since board rendering needs `chess.js`; the actual PDF rendering (headless Chrome — the server's `/.export/pdf`, or the desktop app's own `export_pdf` Tauri command) lives behind `editor.exportPdf`, which also picks whichever of those two the current environment has.
 
 ```space-lua
 -- priority: 10
@@ -135,15 +135,14 @@ if not system.isCapacitor() then
     run = function(data)
       local defaultBoardSize = config.get("pdfExport.boardSize", 400)
       local boardSize = data.pageMeta.pdfBoardSize or defaultBoardSize
-      local boardHtml = chess.renderPageForPdf(data.text, boardSize)
       local defaultColumns = config.get("pdfExport.columns", 2)
       local columns = data.pageMeta.pdfColumns or defaultColumns
-      local columnCss = columns == 1 and "column-count:1;" or "column-count:2;column-gap:24px;"
+      local boardHtml = chess.renderPageForPdf(data.text, boardSize, columns)
       local pageName = data.pageMeta.name or "export"
       local safeName = string.gsub(pageName, "/", "_")
       local fullHtml = "<!doctype html><html><head><meta charset=\"utf-8\">" ..
         "<style>" ..
-        "body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#111;margin:0;padding:0 12px;column-fill:auto;" .. columnCss .. "}" ..
+        "body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;color:#111;margin:0;padding:0 12px;}" ..
         "h1,h2,h3,h4,h5,h6{break-after:avoid !important;page-break-after:avoid !important;-webkit-column-break-after:avoid !important;}" ..
         "p{orphans:3;widows:3;}" ..
         "</style></head><body>" .. boardHtml .. "</body></html>"
