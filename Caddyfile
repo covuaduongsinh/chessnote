@@ -1,0 +1,22 @@
+# Caddyfile cho ChessNote trên VPS
+# Tự động hỗ trợ cả Domain Name (tự cấp HTTPS) hoặc IP Address
+
+{$DOMAIN_NAME} {
+    # 1. Định tuyến cho Cloud Sync Hub (WebDAV & WebSocket Realtime Push)
+    handle /sync/* {
+        uri strip_prefix /sync
+        reverse_proxy chessnote-sync:8080
+    }
+
+    handle /_push {
+        reverse_proxy chessnote-sync:8080
+    }
+
+    # 2. Định tuyến mặc định cho ChessNote Web Application
+    handle {
+        reverse_proxy chessnote-app:3000
+    }
+
+    # Tối ưu hóa nén dữ liệu truyền tải
+    encode zstd gzip
+}

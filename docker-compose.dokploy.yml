@@ -1,4 +1,5 @@
 services:
+  # 1. ChessNote Full Web Application Server
   chessnote:
     build:
       context: .
@@ -12,7 +13,7 @@ services:
       - SB_FOLDER=/space
       - CHROMIUM_PATH=/usr/bin/chromium-browser
       - SB_CHROME_DATA_DIR=/tmp/chrome-data
-      - SB_USER=
+      - SB_USER=${SB_USER:-}
     volumes:
       - chessnote-space:/space
     networks:
@@ -37,9 +38,63 @@ services:
       - traefik.http.routers.chessnote-websecure.service=chessnote-service
       - traefik.http.services.chessnote-service.loadbalancer.server.port=3000
 
+  # 2. ChessNote Cloud Sync Hub (WebDAV & WebSocket Realtime Push)
+  chessnote-sync:
+    build:
+      context: ./cloud-server
+      dockerfile: Dockerfile
+    image: chessnote-sync:latest
+    container_name: chessnote-sync
+    restart: unless-stopped
+    environment:
+      - CHESSNOTE_CLOUD_PORT=8080
+      - CHESSNOTE_CLOUD_DATA_DIR=/data
+      - CHESSNOTE_CLOUD_USERS=${SYNC_USERS:-admin:MatKhauSync2026!}
+    volumes:
+      - chessnote-sync-data:/data
+    networks:
+      - dokploy-network
+      - default
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - "traefik.http.routers.chessnote-sync-web.rule=Host(`chessnote.dsc.edu.vn`) && (PathPrefix(`/sync`) || PathPrefix(`/_push`))"
+      - traefik.http.routers.chessnote-sync-web.entrypoints=web
+      - traefik.http.routers.chessnote-sync-web.middlewares=redirect-to-https@file
+      - traefik.http.routers.chessnote-sync-web.service=chessnote-sync-service
+      - "traefik.http.routers.chessnote-sync-websecure.rule=Host(`chessnote.dsc.edu.vn`) && (PathPrefix(`/sync`) || PathPrefix(`/_push`))"
+      - traefik.http.routers.chessnote-sync-websecure.entrypoints=websecure
+      - traefik.http.routers.chessnote-sync-websecure.tls.certresolver=letsencrypt
+      - traefik.http.routers.chessnote-sync-websecure.middlewares=chessnote-sync-stripprefix
+      - traefik.http.middlewares.chessnote-sync-stripprefix.stripprefix.prefixes=/sync
+      - traefik.http.routers.chessnote-sync-websecure.service=chessnote-sync-service
+      - traefik.http.services.chessnote-sync-service.loadbalancer.server.port=8080
+
+  # 3. AI Sidecar
+  chessnote-ai:
+    build:
+      context: ./ai-sidecar
+      dockerfile: Dockerfile
+    image: chessnote-ai:latest
+    container_name: chessnote-ai
+    restart: unless-stopped
+    environment:
+      - AI_SIDECAR_PORT=3457
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    networks:
+      - dokploy-network
+      - default
+
 volumes:
   chessnote-space:
     name: chessnote-space
+  chessnote-sync-data:
+    name: chessnote-sync-data
 
 networks:
   dokploy-network:
