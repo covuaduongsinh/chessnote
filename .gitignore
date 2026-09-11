@@ -46,6 +46,11 @@ android/local.properties
 ios/App/build
 ios/App/Pods
 
+# Android release signing secrets — never commit the keystore or its
+# passwords; keep them only in a local, private backup.
+android/keystore/
+android/keystore.properties
+
 # Tauri desktop build artifacts (Cargo.lock is intentionally tracked, same
 # policy as the root workspace — this crate also produces a binary)
 desktop/src-tauri/target
