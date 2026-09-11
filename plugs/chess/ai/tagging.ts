@@ -8,9 +8,15 @@
 // phím. Thay vào đó, tính năng này là một NÚT BẤM trong pgnWidget ("🏷️ AI Gợi ý
 // tag"), đúng khuôn "AI Giải thích"/"AI Bình luận ván" đã có — người dùng chủ động
 // bấm khi muốn, không có lượt gọi AI nào xảy ra ngoài ý muốn.
-import { markdown, space, system } from "@silverbulletmd/silverbullet/syscalls";
+import {
+  chessSql,
+  markdown,
+  space,
+  system,
+} from "@silverbulletmd/silverbullet/syscalls";
 import type { YamlPatch } from "../../../plug-api/lib/yaml.ts";
 import { extractFrontMatter } from "../../index/frontmatter.ts";
+import { extractChessGames } from "../index.ts";
 import { aiAsk } from "./bridge.ts";
 
 export interface TagSuggestionInput {
@@ -71,7 +77,8 @@ export function parseTagSuggestion(aiText: string): TagSuggestion | null {
 export async function suggestTags(
   input: TagSuggestionInput,
 ): Promise<
-  { ok: true; tags: string[]; summary: string } | { ok: false; error: string }
+  | { ok: true; tags: string[]; summary: string; model: string }
+  | { ok: false; error: string }
 > {
   const result = await aiAsk(buildTagSuggestionPrompt(input));
   if (!result.ok) return result;
@@ -82,18 +89,28 @@ export async function suggestTags(
       error: "AI trả lời sai định dạng, không tự áp dụng được.",
     };
   }
-  return { ok: true, ...parsed };
+  return { ok: true, ...parsed, model: result.model };
 }
 
 /**
  * Gộp tag AI gợi ý vào tag đã có của trang (không xoá/ghi đè tag cũ nào), và ghi
  * một câu tóm tắt vào frontmatter `chessSummary`. Chỉ gọi khi người dùng đã bấm
  * "Áp dụng" trên gợi ý hiện ra trên widget — không bao giờ tự động chạy.
+ *
+ * Phase 5b (docs/plans/2026-09-11-dbms-sqlite-wasm-tich-hop.md): sau khi ghi
+ * frontmatter, gọi thêm chessSql.upsertAiAnnotation cho mỗi ván chess-game
+ * trên trang (thường chỉ 1) để lưu confidence/model — 2 field không có
+ * tương đương trong frontmatter nên không thể tự động suy ra lại từ việc
+ * reindex trang (xem chess_sql_store.ts's syncAiAnnotationFromFrontmatter).
+ * `confidence` để `null`: chưa có tín hiệu nào để tính con số đó (định dạng
+ * TAGS/TOMTAT chỉ đúng/sai nhị phân, không phải một thang điểm) — cột giữ
+ * chỗ sẵn cho khi có, không bịa số giả.
  */
 export async function applyTagSuggestion(
   pageName: string,
   tags: string[],
   summary: string,
+  modelVersion = "",
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const text = await space.readPage(pageName);
@@ -115,6 +132,18 @@ export async function applyTagSuggestion(
       patches,
     );
     await space.writePage(pageName, patchedText);
+
+    const games = extractChessGames(pageName, tree);
+    for (const g of games) {
+      await chessSql.upsertAiAnnotation({
+        ref: g.ref,
+        page: pageName,
+        summary,
+        tags: mergedTags,
+        confidence: null,
+        modelVersion,
+      });
+    }
     return { ok: true };
   } catch (e) {
     return { ok: false, error: (e as Error).message || "Không áp dụng được." };

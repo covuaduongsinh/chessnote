@@ -1,10 +1,17 @@
 import { describe, expect, test, vi } from "vitest";
 
-type AiAskResult = { ok: true; text: string } | { ok: false; error: string };
+type AiAskResult =
+  | {
+      ok: true;
+      text: string;
+      model?: string;
+    }
+  | { ok: false; error: string };
 const aiAskMock = vi.fn(
   async (_prompt: string): Promise<AiAskResult> => ({
     ok: true,
     text: "mock reply",
+    model: "mock-model",
   }),
 );
 vi.mock("./bridge.ts", () => ({
@@ -16,6 +23,7 @@ const patchFrontmatterMock = vi.fn(
 );
 const readPageMock = vi.fn(async (_page: string) => "# Page\n");
 const writePageMock = vi.fn(async (_page: string, _text: string) => ({}));
+const upsertAiAnnotationMock = vi.fn(async (_annotation: unknown) => {});
 vi.mock("@silverbulletmd/silverbullet/syscalls", () => ({
   markdown: { parseMarkdown: (text: string) => ({ type: "Document", text }) },
   space: {
@@ -26,10 +34,22 @@ vi.mock("@silverbulletmd/silverbullet/syscalls", () => ({
     invokeFunction: (name: string, ...args: unknown[]) =>
       patchFrontmatterMock(args[0] as string, args[1]),
   },
+  chessSql: {
+    upsertAiAnnotation: (annotation: unknown) =>
+      upsertAiAnnotationMock(annotation),
+  },
+  index: {},
 }));
 vi.mock("../../index/frontmatter.ts", () => ({
   extractFrontMatter: vi.fn(() => ({ tags: [] })),
 }));
+// extractChessGames() (called by applyTagSuggestion) parses the page tree
+// with chess.js for real ```pgn``` blocks — the mocked tree here has none,
+// so it always returns []. That's fine: these tests only assert what
+// applyTagSuggestion does with the frontmatter/writePage side, not the
+// per-game SQL annotation loop (covered manually per the Phase 5b checklist,
+// same as the rest of the SQL-backed surface — see chess_pgn_date.ts's
+// module comment for why WASM-adjacent logic isn't unit-tested here).
 
 const {
   buildTagSuggestionPrompt,
@@ -103,6 +123,7 @@ describe("suggestTags — thin pass-through with strict parsing", () => {
     aiAskMock.mockResolvedValueOnce({
       ok: true,
       text: "TAGS: sicilian, blunder\nTOMTAT: Đen mất quân sớm.",
+      model: "claude-haiku-4-5",
     });
     const result = await suggestTags(input());
     expect(aiAskMock).toHaveBeenCalledTimes(1);
@@ -111,6 +132,7 @@ describe("suggestTags — thin pass-through with strict parsing", () => {
       ok: true,
       tags: ["sicilian", "blunder"],
       summary: "Đen mất quân sớm.",
+      model: "claude-haiku-4-5",
     });
   });
 

@@ -111,10 +111,16 @@ export async function aiAuthCancel() {
 export async function aiAsk(prompt: string) {
   const mode = await config.get<string>("chess.ai.mode", "subscription");
   const model = await config.get<string>("chess.ai.model", "claude-haiku-4-5");
-  return sidecarFetch("/ai/generate", {
+  const result = await sidecarFetch("/ai/generate", {
     method: "POST",
     body: { prompt, mode, model },
   });
+  // Model attribution for Phase 5b (docs/plans/2026-09-11-dbms-sqlite-wasm-tich-hop.md)
+  // — the sidecar's /ai/generate response doesn't echo the model back, but
+  // the caller (tagging.ts's applyTagSuggestion) needs it to record which
+  // model produced a stored AI annotation. Known here (it's what was sent),
+  // not worth a sidecar round-trip change for.
+  return { ...result, model };
 }
 
 const SIDECAR_NOT_RUNNING_HINT =

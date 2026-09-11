@@ -1,100 +1,65 @@
 import { expect, test } from "vitest";
-import type { ChessGameObject } from "./index.ts";
-import { findRelatedGames } from "./related_games.ts";
+import { buildRelatedGameReasons } from "./related_games.ts";
 
-function game(overrides: Partial<ChessGameObject> = {}): ChessGameObject {
-  return {
-    ref: `${overrides.page || "Page"}@1`,
-    tag: "chess-game",
-    page: "Page",
-    pgn: "1. e4 e5 *",
-    white: "Alice",
-    black: "Bob",
-    result: "*",
-    date: "",
-    eco: "",
-    event: "",
-    ...overrides,
-  };
-}
+// findRelatedGames() itself is SQL-backed (chessSql.queryRelatedGames) since
+// Phase 3 of docs/plans/2026-09-11-dbms-sqlite-wasm-tich-hop.md, so it can't
+// be exercised under vitest (WASM import fails outside a browser — see
+// client/data/chess_pgn_date.ts's module comment for why). buildRelatedGameReasons()
+// is the pure part that survived the migration: it re-derives the "why this
+// game is related" text from (current, other) alone, independent of how the
+// candidate set was scored/filtered. The scoring itself is verified manually
+// (see the plan doc's Phase 3 checklist).
 
-test("scores same-ECO games higher and explains why", () => {
-  const current = {
-    page: "Current",
-    white: "Nobody",
-    black: "Nobody2",
-    eco: "C50",
-  };
-  const candidates = [
-    game({ page: "SameEco", eco: "C50", white: "X", black: "Y" }),
-    game({ page: "DifferentEco", eco: "B90", white: "X", black: "Y" }),
-    game({ page: "NoEco", eco: "", white: "X", black: "Y" }),
-  ];
-  const results = findRelatedGames(current, candidates);
-  expect(results.map((r) => r.page)).toEqual(["SameEco"]);
-  expect(results[0].reasons).toContain("cùng mã khai cuộc ECO C50");
+test("explains a same-ECO match", () => {
+  const current = { white: "Nobody", black: "Nobody2", eco: "C50" };
+  const other = { white: "X", black: "Y", eco: "C50" };
+  expect(buildRelatedGameReasons(current, other)).toContain(
+    "cùng mã khai cuộc ECO C50",
+  );
 });
 
-test("matches shared opponent regardless of which side they played", () => {
-  const current = { page: "Current", white: "Alice", black: "Bob", eco: "" };
-  const candidates = [
-    game({ page: "AliceAsBlack", white: "Carol", black: "Alice" }),
-    game({ page: "Unrelated", white: "Dave", black: "Eve" }),
-  ];
-  const results = findRelatedGames(current, candidates);
-  expect(results.map((r) => r.page)).toEqual(["AliceAsBlack"]);
-  expect(results[0].reasons[0]).toContain("Alice");
+test("does not claim an ECO match when ECOs differ or either is empty", () => {
+  expect(
+    buildRelatedGameReasons(
+      { white: "A", black: "B", eco: "C50" },
+      { white: "X", black: "Y", eco: "B90" },
+    ),
+  ).toEqual([]);
+  expect(
+    buildRelatedGameReasons(
+      { white: "A", black: "B", eco: "" },
+      { white: "X", black: "Y", eco: "" },
+    ),
+  ).toEqual([]);
+});
+
+test("explains a shared-player match regardless of which side they played", () => {
+  const current = { white: "Alice", black: "Bob", eco: "" };
+  const other = { white: "Carol", black: "Alice", eco: "" };
+  const reasons = buildRelatedGameReasons(current, other);
+  expect(reasons).toHaveLength(1);
+  expect(reasons[0]).toContain("Alice");
 });
 
 test("ignores placeholder names (White/Black/empty) as a shared-player signal", () => {
-  const current = { page: "Current", white: "White", black: "Black", eco: "" };
-  const candidates = [
-    game({ page: "AlsoPlaceholder", white: "White", black: "Black" }),
-  ];
-  expect(findRelatedGames(current, candidates)).toEqual([]);
+  const current = { white: "White", black: "Black", eco: "" };
+  const other = { white: "White", black: "Black", eco: "" };
+  expect(buildRelatedGameReasons(current, other)).toEqual([]);
 });
 
-test("excludes games on the same page (assumed to be the game being viewed)", () => {
-  const current = {
-    page: "SamePage",
-    white: "Alice",
-    black: "Bob",
-    eco: "C50",
-  };
-  const candidates = [
-    game({ page: "SamePage", eco: "C50", white: "Alice", black: "Bob" }),
-  ];
-  expect(findRelatedGames(current, candidates)).toEqual([]);
+test("combines both reasons when ECO and player both match", () => {
+  const current = { white: "Alice", black: "Bob", eco: "C50" };
+  const other = { white: "Alice", black: "Z", eco: "C50" };
+  const reasons = buildRelatedGameReasons(current, other);
+  expect(reasons).toHaveLength(2);
+  expect(reasons[0]).toContain("ECO C50");
+  expect(reasons[1]).toContain("Alice");
 });
 
-test("combines ECO + shared-opponent scores and sorts descending", () => {
-  const current = { page: "Current", white: "Alice", black: "Bob", eco: "C50" };
-  const candidates = [
-    game({ page: "EcoOnly", eco: "C50", white: "X", black: "Y" }), // score 3
-    game({ page: "EcoAndOpponent", eco: "C50", white: "Alice", black: "Z" }), // score 5
-    game({ page: "OpponentOnly", eco: "", white: "Bob", black: "Z" }), // score 2
-  ];
-  const results = findRelatedGames(current, candidates);
-  expect(results.map((r) => r.page)).toEqual([
-    "EcoAndOpponent",
-    "EcoOnly",
-    "OpponentOnly",
-  ]);
-  expect(results[0].score).toBe(5);
-});
-
-test("caps results at the given limit", () => {
-  const current = { page: "Current", white: "", black: "", eco: "C50" };
-  const candidates = Array.from({ length: 10 }, (_, i) =>
-    game({ page: `G${i}`, eco: "C50", white: "X", black: "Y" }),
-  );
-  expect(findRelatedGames(current, candidates, 3).length).toBe(3);
-});
-
-test("returns an empty list when nothing matches", () => {
-  const current = { page: "Current", white: "Alice", black: "Bob", eco: "C50" };
-  const candidates = [
-    game({ page: "Other", eco: "B90", white: "X", black: "Y" }),
-  ];
-  expect(findRelatedGames(current, candidates)).toEqual([]);
+test("deduplicates a name shared on both sides (e.g. self-play test data)", () => {
+  const current = { white: "Alice", black: "Alice", eco: "" };
+  const other = { white: "Alice", black: "Alice", eco: "" };
+  const reasons = buildRelatedGameReasons(current, other);
+  expect(reasons).toHaveLength(1);
+  expect(reasons[0]).toBe("cùng người chơi: Alice");
 });

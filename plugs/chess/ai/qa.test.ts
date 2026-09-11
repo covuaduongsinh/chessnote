@@ -11,12 +11,12 @@ vi.mock("./bridge.ts", () => ({
   aiAsk: (prompt: string) => aiAskMock(prompt),
 }));
 
-const { extractKeywords, scoreEntries, citationLine, buildQaPrompt } =
-  await import("./qa.ts");
-type QaContextEntry = Parameters<typeof citationLine>[0];
+const { citationLine, buildQaPrompt } = await import("./qa.ts");
+type SearchGameRow = Parameters<typeof citationLine>[0];
 
-function entry(overrides: Partial<QaContextEntry> = {}): QaContextEntry {
+function entry(overrides: Partial<SearchGameRow> = {}): SearchGameRow {
   return {
+    ref: "Game1@0",
     page: "Game1",
     white: "Alice",
     black: "Bob",
@@ -27,67 +27,6 @@ function entry(overrides: Partial<QaContextEntry> = {}): QaContextEntry {
     ...overrides,
   };
 }
-
-describe("extractKeywords", () => {
-  test("strips diacritics, lowercases, and drops short/stopword tokens", () => {
-    const keywords = extractKeywords("Tìm ván tôi thua vì bỏ hậu ở Sicilian");
-    expect(keywords).toContain("sicilian");
-    expect(keywords).toContain("hau");
-    expect(keywords).not.toContain("toi");
-    expect(keywords).not.toContain("vi");
-    expect(keywords).not.toContain("o");
-  });
-
-  test("de-duplicates repeated words", () => {
-    expect(extractKeywords("blunder blunder blunder")).toEqual(["blunder"]);
-  });
-
-  test("returns an empty list for a question made entirely of stopwords", () => {
-    expect(extractKeywords("là và có không")).toEqual([]);
-  });
-});
-
-describe("scoreEntries", () => {
-  test("matches keywords against white/black/eco/event/summary, diacritic-insensitive", () => {
-    const entries = [
-      entry({ page: "Sicilian1", eco: "B90", event: "Sicilian Najdorf" }),
-      entry({ page: "Italian1", eco: "C50", event: "Italian Game" }),
-    ];
-    const scored = scoreEntries(entries, extractKeywords("ván Sicilian"));
-    expect(scored.map((e) => e.page)).toEqual(["Sicilian1"]);
-  });
-
-  test("excludes entries that match none of the keywords", () => {
-    const entries = [
-      entry({ page: "NoMatch", white: "X", black: "Y", eco: "", event: "" }),
-    ];
-    expect(scoreEntries(entries, ["sicilian"])).toEqual([]);
-  });
-
-  test("ranks entries matching more keywords above those matching fewer", () => {
-    const entries = [
-      entry({ page: "OneMatch", white: "sicilian", black: "Z" }),
-      entry({ page: "TwoMatches", white: "sicilian", black: "blunder-game" }),
-    ];
-    const scored = scoreEntries(entries, ["sicilian", "blunder"]);
-    expect(scored.map((e) => e.page)).toEqual(["TwoMatches", "OneMatch"]);
-  });
-
-  test("finds matches in the Giai đoạn C summary field too", () => {
-    const entries = [
-      entry({
-        page: "Summarized",
-        white: "X",
-        black: "Y",
-        eco: "",
-        summary: "Đen hy sinh hậu sớm",
-      }),
-      entry({ page: "NoSummary", white: "A", black: "B", eco: "" }),
-    ];
-    const scored = scoreEntries(entries, extractKeywords("hy sinh hậu"));
-    expect(scored.map((e) => e.page)).toEqual(["Summarized"]);
-  });
-});
 
 describe("citationLine", () => {
   test("includes the wikilink, both player names, and result", () => {
@@ -103,7 +42,7 @@ describe("citationLine", () => {
     expect(line).not.toContain("ECO:");
   });
 
-  test("includes the Giai đoạn C summary when present", () => {
+  test("includes the AI summary when present", () => {
     const line = citationLine(entry({ summary: "Ván đấu sắc bén." }));
     expect(line).toContain("Ván đấu sắc bén.");
   });

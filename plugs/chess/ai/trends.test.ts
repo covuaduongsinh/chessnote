@@ -83,6 +83,12 @@ function game(overrides: Partial<ChessGameObject> = {}): ChessGameObject {
     date: "",
     eco: "",
     event: "",
+    comments: "",
+    whiteElo: "",
+    blackElo: "",
+    timeControl: "",
+    opening: "",
+    variation: "",
     ...overrides,
   };
 }

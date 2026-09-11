@@ -1,8 +1,7 @@
-import { index, system } from "@silverbulletmd/silverbullet/syscalls";
+import { system } from "@silverbulletmd/silverbullet/syscalls";
 import { Chess } from "chess.js";
 import { CHESS_CSS } from "./board_renderer.ts";
 import { buildMoveList } from "./engine/game_reviewer.ts";
-import type { ChessGameFields } from "./index.ts";
 import { findRelatedGames, type RelatedGameMatch } from "./related_games.ts";
 import {
   BOARD_THEMES,
@@ -841,20 +840,18 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   // when the user clicks "Game Review" (see the widget script below).
   const moveList = buildMoveList(bodyText.trim());
 
-  // Related games (Giai đoạn D): thuần rule-based trên chess-game Object Index
-  // (cùng ECO, cùng người chơi) — rẻ, không AI/engine, nên tính luôn ở đây thay
-  // vì phải chờ người dùng bấm nút. Không chặn render bàn cờ nếu Object Index
-  // chưa sẵn sàng hoặc lỗi tạm thời (vd. đang trong lần index đầu tiên).
+  // Related games (Giai đoạn D, SQL hoá ở Phase 3): thuần rule-based (cùng
+  // ECO, cùng người chơi) qua chessSql.queryRelatedGames — rẻ, không
+  // AI/engine, nên tính luôn ở đây thay vì phải chờ người dùng bấm nút. Không
+  // chặn render bàn cờ nếu SQLite chưa sẵn sàng hoặc lỗi tạm thời.
   let relatedGames: RelatedGameMatch[] = [];
   try {
-    const allGames = await index.queryLuaObjects<ChessGameFields>(
-      "chess-game",
-      {},
-    );
-    relatedGames = findRelatedGames(
-      { page: pageName, white, black, eco },
-      allGames,
-    );
+    relatedGames = await findRelatedGames({
+      page: pageName,
+      white,
+      black,
+      eco,
+    });
   } catch {
     relatedGames = [];
   }
@@ -981,7 +978,7 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   let annotateResult = null;
   let isTagSuggestOn = false;
   let tagSuggestRequestSeq = 0;
-  let tagSuggestResult = null; // { tags, summary } | { error }
+  let tagSuggestResult = null; // { tags, summary, model } | { error }
   // AI features need a server (proxied through /.proxy/... to ai-sidecar) that
   // the offline Capacitor mobile build doesn't have — set once at init below,
   // checked before every AI call so mobile gets a clear message instead of a
@@ -1323,6 +1320,7 @@ export async function pgnWidget(bodyText: string, pageName: string) {
           pageName,
           tagSuggestResult.tags,
           tagSuggestResult.summary,
+          tagSuggestResult.model || "",
         );
         if (result && result.ok) {
           applyStatus.innerText = "✓ Đã áp dụng vào frontmatter.";
@@ -1360,7 +1358,7 @@ export async function pgnWidget(bodyText: string, pageName: string) {
       const result = await syscall("chess.ai.suggestTags", { ...gameHeaders, openingMoves });
       if (mySeq !== tagSuggestRequestSeq) return;
       tagSuggestResult = result.ok
-        ? { tags: result.tags, summary: result.summary }
+        ? { tags: result.tags, summary: result.summary, model: result.model }
         : { error: result.error };
       renderTagSuggest();
     } catch (e) {

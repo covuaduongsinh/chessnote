@@ -1,20 +1,56 @@
 import { BasenameIndex } from "@silverbulletmd/silverbullet/lib/resolve_path";
-import { PlugNamespaceHook } from "./plugos/hooks/plug_namespace.ts";
 import type { SilverBulletHooks } from "@silverbulletmd/silverbullet/type/manifest";
-import type { EventHook } from "./plugos/hooks/event.ts";
-import { WorkerSandbox } from "./plugos/sandboxes/worker_sandbox.ts";
-
-import assetSyscalls from "./plugos/syscalls/asset.ts";
-import { System } from "./plugos/system.ts";
+import { builtinPlugPaths } from "../plugs/builtin_plugs.ts";
 import type { Client } from "./client.ts";
+import { createCommandKeyBindings } from "./codemirror/editor_state.ts";
+import type { Config } from "./config.ts";
+import { ChessSqlStore } from "./data/chess_sql_store.ts";
+import type { DataStore } from "./data/datastore.ts";
+import type { DataStoreMQ } from "./data/mq.datastore.ts";
+import type { ObjectIndex } from "./data/object_index.ts";
+import { registerEditorCommands } from "./editor_commands.ts";
+import { setRevisionsAvailable } from "./navigator/builtins.ts";
+import { registerNavigatorCommands } from "./navigator/commands.ts";
+import { restoreDocks, setViewDefaults } from "./navigator/navigator.ts";
+import { clearScriptViews, setLuaEnvSource } from "./navigator/registry.ts";
+import {
+  mergeLegacyDocks,
+  normalizeViewDefaults,
+  type ViewDefaultsTable,
+} from "./navigator/view_defaults.ts";
 import { CodeWidgetHook } from "./plugos/hooks/code_widget.ts";
 import { CommandHook } from "./plugos/hooks/command.ts";
+import { DocumentEditorHook } from "./plugos/hooks/document_editor.ts";
+import type { EventHook } from "./plugos/hooks/event.ts";
+import { MQHook } from "./plugos/hooks/mq.ts";
+import { PlugNamespaceHook } from "./plugos/hooks/plug_namespace.ts";
 import { SlashCommandHook } from "./plugos/hooks/slash_command.ts";
 import { SyscallHook } from "./plugos/hooks/syscall.ts";
+import { KVPrimitivesManifestCache } from "./plugos/manifest_cache.ts";
+import { WorkerSandbox } from "./plugos/sandboxes/worker_sandbox.ts";
+import assetSyscalls from "./plugos/syscalls/asset.ts";
+import { chessEmbeddingSyscalls } from "./plugos/syscalls/chess_embedding.ts";
+import { chessSqlSyscalls } from "./plugos/syscalls/chess_sql.ts";
+import { clientCodeWidgetSyscalls } from "./plugos/syscalls/client_code_widget.ts";
 import { clientStoreSyscalls } from "./plugos/syscalls/clientStore.ts";
+import { codeWidgetSyscalls } from "./plugos/syscalls/code_widget.ts";
+import { configSyscalls } from "./plugos/syscalls/config.ts";
+import {
+  dataStoreReadSyscalls,
+  dataStoreWriteSyscalls,
+} from "./plugos/syscalls/datastore.ts";
 import { editorSyscalls } from "./plugos/syscalls/editor.ts";
+import { eventSyscalls } from "./plugos/syscalls/event.ts";
 import { sandboxFetchSyscalls } from "./plugos/syscalls/fetch.ts";
+import { iconSyscalls } from "./plugos/syscalls/icon.ts";
+import { indexSyscalls } from "./plugos/syscalls/index.ts";
+import { jsonschemaSyscalls } from "./plugos/syscalls/jsonschema.ts";
+import { languageSyscalls } from "./plugos/syscalls/language.ts";
 import { markdownSyscalls } from "./plugos/syscalls/markdown.ts";
+import { mqSyscalls } from "./plugos/syscalls/mq.ts";
+import { navigatorSyscalls } from "./plugos/syscalls/navigator.ts";
+import { searchSyscalls } from "./plugos/syscalls/search.ts";
+import { serviceRegistrySyscalls } from "./plugos/syscalls/service_registry.ts";
 import { shellSyscalls } from "./plugos/syscalls/shell.ts";
 import {
   spaceReadSyscalls,
@@ -22,55 +58,21 @@ import {
 } from "./plugos/syscalls/space.ts";
 import { syncSyscalls } from "./plugos/syscalls/sync.ts";
 import { systemSyscalls } from "./plugos/syscalls/system.ts";
-import type { Space } from "./space.ts";
-import { MQHook } from "./plugos/hooks/mq.ts";
-import { mqSyscalls } from "./plugos/syscalls/mq.ts";
-import {
-  dataStoreReadSyscalls,
-  dataStoreWriteSyscalls,
-} from "./plugos/syscalls/datastore.ts";
-import type { DataStore } from "./data/datastore.ts";
-import { languageSyscalls } from "./plugos/syscalls/language.ts";
-import { codeWidgetSyscalls } from "./plugos/syscalls/code_widget.ts";
-import { clientCodeWidgetSyscalls } from "./plugos/syscalls/client_code_widget.ts";
-import { KVPrimitivesManifestCache } from "./plugos/manifest_cache.ts";
-import { createCommandKeyBindings } from "./codemirror/editor_state.ts";
-import type { DataStoreMQ } from "./data/mq.datastore.ts";
-import { jsonschemaSyscalls } from "./plugos/syscalls/jsonschema.ts";
-import { luaSyscalls } from "./space_lua/syscalls.ts";
-import { indexSyscalls } from "./plugos/syscalls/index.ts";
-import { configSyscalls } from "./plugos/syscalls/config.ts";
-import { eventSyscalls } from "./plugos/syscalls/event.ts";
-import { DocumentEditorHook } from "./plugos/hooks/document_editor.ts";
-import type { Command } from "./types/command.ts";
-import { SpaceLuaEnvironment } from "./space_lua.ts";
-import type { ILuaFunction } from "./space_lua/runtime.ts";
-import { builtinPlugPaths } from "../plugs/builtin_plugs.ts";
-import { registerEditorCommands } from "./editor_commands.ts";
+import { System } from "./plugos/system.ts";
 import { ServiceRegistry } from "./service_registry.ts";
-import { serviceRegistrySyscalls } from "./plugos/syscalls/service_registry.ts";
-import type { ObjectIndex } from "./data/object_index.ts";
-import { searchSyscalls } from "./plugos/syscalls/search.ts";
-import { iconSyscalls } from "./plugos/syscalls/icon.ts";
-import { navigatorSyscalls } from "./plugos/syscalls/navigator.ts";
-import { setRevisionsAvailable } from "./navigator/builtins.ts";
-import { registerNavigatorCommands } from "./navigator/commands.ts";
-import { restoreDocks, setViewDefaults } from "./navigator/navigator.ts";
-import { clearScriptViews, setLuaEnvSource } from "./navigator/registry.ts";
-import { listQuarantined, unquarantine } from "./space_lua/quarantine.ts";
+import type { Space } from "./space.ts";
 import {
   BUSY_LIMIT_COMMAND_MS,
   type LuaBudget,
   makeLuaBudget,
 } from "./space_lua/budget.ts";
 import { offerStopNotification } from "./space_lua/budget_ui.ts";
+import { listQuarantined, unquarantine } from "./space_lua/quarantine.ts";
+import type { ILuaFunction } from "./space_lua/runtime.ts";
 import { setBoundaryBudgetFactory } from "./space_lua/runtime.ts";
-import {
-  mergeLegacyDocks,
-  normalizeViewDefaults,
-  type ViewDefaultsTable,
-} from "./navigator/view_defaults.ts";
-import type { Config } from "./config.ts";
+import { luaSyscalls } from "./space_lua/syscalls.ts";
+import { SpaceLuaEnvironment } from "./space_lua.ts";
+import type { Command } from "./types/command.ts";
 
 const mqTimeout = 10000;
 const mqTimeoutRetry = 3;
@@ -96,6 +98,10 @@ export class ClientSystem {
   mqHook!: MQHook;
 
   serviceRegistry!: ServiceRegistry;
+
+  // Chess DBMS integration Phase 1 (docs/plans/2026-09-11-dbms-sqlite-wasm-tich-hop.md):
+  // an embedded SQLite WASM cache, exposed to plugs via the chessSql syscall.
+  readonly chessSqlStore = new ChessSqlStore();
 
   spaceLuaEnv: SpaceLuaEnvironment;
   readonly scriptCommands = new Map<string, Command>();
@@ -225,6 +231,8 @@ export class ClientSystem {
       languageSyscalls(),
       jsonschemaSyscalls(),
       indexSyscalls(this.objectIndex, this.client),
+      chessSqlSyscalls(this.chessSqlStore),
+      chessEmbeddingSyscalls(this.chessSqlStore),
       luaSyscalls(this.system, () => this.spaceLuaEnv.env),
       mqSyscalls(this.mq),
       serviceRegistrySyscalls(this.serviceRegistry),

@@ -6,6 +6,14 @@ functions:
     path: ./index.ts:indexChessGames
     events:
       - page:index
+  deleteChessGamesForPage:
+    path: ./index.ts:deleteChessGamesForPage
+    events:
+      - page:deleted
+  indexRepertoireLines:
+    path: ./repertoire/index.ts:indexRepertoireLines
+    events:
+      - page:index
   fenWidget:
     path: ./chess.ts:fenWidget
     codeWidget: fen
@@ -173,6 +181,22 @@ functions:
     path: ./ai/trends.ts:commandAnalyzeTrends
     command:
       name: "Chess: Phân tích xu hướng"
+  chessOpeningStatsCommand:
+    path: ./ai/opening_stats.ts:commandOpeningStats
+    command:
+      name: "Chess: Thống kê khai cuộc"
+  chessRepertoireTrainCommand:
+    path: ./repertoire/trainer.ts:commandRepertoireTrain
+    command:
+      name: "Chess: Ôn tập khai cuộc"
+  chessComputeEmbeddingsCommand:
+    path: ./ai/semantic_index.ts:commandComputeEmbeddings
+    command:
+      name: "Chess: Tính embedding ngữ nghĩa"
+  chessDebugDumpSqlCommand:
+    path: ./ai/debug_dump.ts:commandDebugDumpSql
+    command:
+      name: "Chess: Kiểm tra dữ liệu SQLite (debug)"
   chessAiSuggestTags:
     path: ./ai/tagging.ts:suggestTags
     syscall:
@@ -209,10 +233,13 @@ functions:
       name: chess.applyTagSuggestion
       description: >-
         Ghi tag gợi ý (gộp, không xoá tag cũ) + tóm tắt (frontmatter `chessSummary`)
-        vào ghi chú. Chỉ gọi khi người dùng đã bấm "Áp dụng" trên gợi ý AI.
+        vào ghi chú, đồng thời lưu bản có cấu trúc (kèm model đã dùng) vào
+        SQLite qua chessSql.upsertAiAnnotation. Chỉ gọi khi người dùng đã bấm
+        "Áp dụng" trên gợi ý AI.
       parameters:
         - { name: pageName, type: string }
         - { name: tags, type: array }
         - { name: summary, type: string }
+        - { name: modelVersion, type: string }
       returns:
         - { type: object }

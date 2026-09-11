@@ -33,11 +33,19 @@ r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4
 
 ---
 
-## 2. Cây Biến Thể Chi Tiết (Variation Tree)
+## 2. Các Biến (Variations)
+
+Mỗi biến là MỘT khối ` ```pgn ``` ` riêng, đặt tên qua tag `[Variation "..."]` — ChessNote
+đọc từng khối này thành 1 dòng ôn tập riêng cho lệnh "Chess: Ôn tập khai cuộc" (SRS). Các
+biến dùng chung tiền tố nước đi thường lặp lại tiền tố đó ở mỗi khối — chấp nhận được, đổi
+lại không cần cú pháp biến thể lồng nhau phức tạp.
+
+### Biến chính (Main Line)
 
 ```pgn
 [Event "Italian Game Repertoire"]
 [ECO "C53"]
+[Variation "Main Line"]
 [White "Repertoire Master"]
 [Black "Opponent"]
 [Result "*"]
@@ -45,18 +53,25 @@ r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4
 1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. c3 Nf6 5. d3 d6 6. O-O O-O 7. h3 a6 8. Bb3 Ba7 9. Re1 h6 10. Nbd2 *
 ```
 
+**Kế hoạch**: Đưa Mã từ d2 lên f1 sang g3/e3 kiểm soát ô d5.
+
+### Biến: Đen chơi 4... Qe7 (Phòng thủ vững chắc)
+
+```pgn
+[Event "Italian Game Repertoire"]
+[ECO "C50"]
+[Variation "Qe7 Defense"]
+[White "Repertoire Master"]
+[Black "Opponent"]
+[Result "*"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. c3 Qe7 5. d4 Bb6 6. O-O d6 7. a4 a6 8. h3 *
+```
+
+**Kế hoạch**: Giữ ưu thế không gian ở trung tâm.
+
 ---
 
-## 3. Các Phương Án Đáp Trả Của Đối Thủ (Opponent Responses)
-
-### Biến 1: Đen chơi 4... Nf6 (Main Line)
-- **Kế hoạch**: 5. d3 d6 6. O-O O-O 7. a4 h6 8. Re1 -> Đưa Mã từ d2 lên f1 sang g3/e3 kiểm soát ô d5.
-
-### Biến 2: Đen chơi 4... Qe7 (Phòng thủ vững chắc)
-- **Kế hoạch**: 5. d4 Bb6 6. O-O d6 7. a4 a6 8. h3 -> Giữ ưu thế không gian ở trung tâm.
-
----
-
-## 4. Ván Cờ Mẫu Của Đại Kiện Tướng (Model Games)
+## 3. Ván Cờ Mẫu Của Đại Kiện Tướng (Model Games)
 - [[Games/Kasparov vs Anand 1995]]
 - [[Games/Carlsen vs So 2021]]

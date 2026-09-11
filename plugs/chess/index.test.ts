@@ -1,6 +1,10 @@
 import { expect, test } from "vitest";
 import { parseMarkdown } from "../../client/markdown_parser/parser.ts";
-import { extractChessGames, isTemplatePage } from "./index.ts";
+import {
+  extractChessGames,
+  isRepertoirePage,
+  isTemplatePage,
+} from "./index.ts";
 
 const validPgn = `[Event "Casual Game"]
 [White "Alice"]
@@ -90,4 +94,12 @@ test("isTemplatePage flags page and slash templates, not real games", () => {
   expect(isTemplatePage({ tags: ["game"] })).toBe(false);
   expect(isTemplatePage({ tags: [] })).toBe(false);
   expect(isTemplatePage({})).toBe(false);
+});
+
+test("isRepertoirePage flags exactly the 'repertoire' tag", () => {
+  expect(isRepertoirePage({ tags: ["repertoire"] })).toBe(true);
+  expect(isRepertoirePage({ tags: ["repertoire", "openings"] })).toBe(true);
+  expect(isRepertoirePage({ tags: ["game"] })).toBe(false);
+  expect(isRepertoirePage({ tags: [] })).toBe(false);
+  expect(isRepertoirePage({})).toBe(false);
 });
