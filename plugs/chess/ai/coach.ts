@@ -8,8 +8,13 @@
 // đúng nguyên tắc "logic nghiệp vụ ở Worker" đã ghi trong chess.ts. `explainMove`/
 // `annotateGame` là 2 hàm mỏng nối `buildXxxPrompt()` (thuần, test được không cần
 // mock) với `aiAsk()` (đã xử lý mode/model/lỗi sidecar).
+
+import type {
+  GameReviewReport,
+  MoveClassification,
+  ReviewedMove,
+} from "../engine/game_reviewer.ts";
 import { aiAsk } from "./bridge.ts";
-import type { GameReviewReport, MoveClassification, ReviewedMove } from "../engine/game_reviewer.ts";
 
 export interface ExplainMoveInput extends ReviewedMove {
   // moveNum/isWhite/san/... đã có sẵn trong ReviewedMove — không cần field thêm,
@@ -45,8 +50,12 @@ export function buildExplainMovePrompt(input: ExplainMoveInput): string {
     "",
     `- Nước đi: ${moveLabel} (${mover} đi)`,
     `- Đánh giá của engine: ${CLASSIFICATION_VI[input.classification]}` +
-      (input.cpl > 0 ? ` (mất ${input.cpl} centipawn so với nước tốt nhất)` : ""),
-    input.bestMoveSan ? `- Nước tốt nhất theo engine tại thời điểm đó: ${input.bestMoveSan}` : "",
+      (input.cpl > 0
+        ? ` (mất ${input.cpl} centipawn so với nước tốt nhất)`
+        : ""),
+    input.bestMoveSan
+      ? `- Nước tốt nhất theo engine tại thời điểm đó: ${input.bestMoveSan}`
+      : "",
     `- Đánh giá trước nước đi (góc nhìn ${mover}, đơn vị quân Tốt): ${formatEval(input.scoreBefore)}`,
     `- Đánh giá sau nước đi (góc nhìn ${mover}): ${formatEval(input.scoreAfter)}`,
     `- FEN trước: ${input.fenBefore}`,
@@ -68,7 +77,12 @@ export async function explainMove(input: ExplainMoveInput) {
 // ---- Bình luận toàn ván ----
 
 const MAX_TURNING_POINTS = 10;
-const TURNING_POINT_CLASSES: MoveClassification[] = ["blunder", "mistake", "brilliant", "great"];
+const TURNING_POINT_CLASSES: MoveClassification[] = [
+  "blunder",
+  "mistake",
+  "brilliant",
+  "great",
+];
 
 export interface GameHeaders {
   white?: string;
@@ -78,15 +92,24 @@ export interface GameHeaders {
 }
 
 export function pickTurningPoints(moves: ReviewedMove[]): ReviewedMove[] {
-  return moves
-    .filter((m) => TURNING_POINT_CLASSES.includes(m.classification))
-    .sort((a, b) => b.cpl - a.cpl)
-    .slice(0, MAX_TURNING_POINTS)
-    // Đưa lại về đúng thứ tự thời gian trong ván để AI kể chuyện mạch lạc.
-    .sort((a, b) => a.moveNum - b.moveNum || (a.isWhite === b.isWhite ? 0 : a.isWhite ? -1 : 1));
+  return (
+    moves
+      .filter((m) => TURNING_POINT_CLASSES.includes(m.classification))
+      .sort((a, b) => b.cpl - a.cpl)
+      .slice(0, MAX_TURNING_POINTS)
+      // Đưa lại về đúng thứ tự thời gian trong ván để AI kể chuyện mạch lạc.
+      .sort(
+        (a, b) =>
+          a.moveNum - b.moveNum ||
+          (a.isWhite === b.isWhite ? 0 : a.isWhite ? -1 : 1),
+      )
+  );
 }
 
-export function buildAnnotateGamePrompt(report: GameReviewReport, headers: GameHeaders = {}): string {
+export function buildAnnotateGamePrompt(
+  report: GameReviewReport,
+  headers: GameHeaders = {},
+): string {
   const turningPoints = pickTurningPoints(report.moves);
   const white = headers.white || "Trắng";
   const black = headers.black || "Đen";
@@ -94,7 +117,10 @@ export function buildAnnotateGamePrompt(report: GameReviewReport, headers: GameH
   const statsLine = (stats: Record<MoveClassification, number>) =>
     Object.entries(stats)
       .filter(([, count]) => count > 0)
-      .map(([cls, count]) => `${CLASSIFICATION_VI[cls as MoveClassification]}: ${count}`)
+      .map(
+        ([cls, count]) =>
+          `${CLASSIFICATION_VI[cls as MoveClassification]}: ${count}`,
+      )
       .join(", ");
 
   const turningPointLines = turningPoints.length
@@ -119,11 +145,15 @@ export function buildAnnotateGamePrompt(report: GameReviewReport, headers: GameH
     "Nêu diễn biến chính và các bước ngoặt liệt kê ở trên, nhận xét ai kiểm soát thế trận và tại " +
       "sao. Không chào hỏi, đi thẳng vào bình luận.",
     "",
-    ANTI_HALLUCINATION_RULE + " Không nhắc tới bất kỳ nước đi nào ngoài danh sách bước ngoặt trên.",
+    ANTI_HALLUCINATION_RULE +
+      " Không nhắc tới bất kỳ nước đi nào ngoài danh sách bước ngoặt trên.",
   ];
   return lines.join("\n");
 }
 
-export async function annotateGame(report: GameReviewReport, headers: GameHeaders = {}) {
+export async function annotateGame(
+  report: GameReviewReport,
+  headers: GameHeaders = {},
+) {
   return aiAsk(buildAnnotateGamePrompt(report, headers));
 }

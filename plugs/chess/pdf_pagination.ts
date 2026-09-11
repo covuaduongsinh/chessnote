@@ -50,9 +50,10 @@ export interface ColumnGeometry {
 }
 
 export function computeColumnGeometry(columns: 1 | 2): ColumnGeometry {
-  const colWidthPx = columns === 1
-    ? CONTENT_WIDTH_PX
-    : Math.floor((CONTENT_WIDTH_PX - COLUMN_GAP_PX) / 2);
+  const colWidthPx =
+    columns === 1
+      ? CONTENT_WIDTH_PX
+      : Math.floor((CONTENT_WIDTH_PX - COLUMN_GAP_PX) / 2);
   return { colWidthPx, colBudgetPx: USABLE_PAGE_HEIGHT_PX };
 }
 
@@ -75,7 +76,10 @@ const HINT_H_PX = 30; // puzzle-hint-box padding + ~1 line + margin-top
 const ERROR_BANNER_H_PX = 40;
 
 /** Deterministic height estimate for a rendered board unit (board + optional title/movetext/hint). */
-export function estimateBoardHeightPx(boardSize: number, meta: BoardMeta): number {
+export function estimateBoardHeightPx(
+  boardSize: number,
+  meta: BoardMeta,
+): number {
   if (meta.isError) return ERROR_BANNER_H_PX;
 
   let h = boardSize + BOARD_MARGIN_PX;
@@ -84,7 +88,10 @@ export function estimateBoardHeightPx(boardSize: number, meta: BoardMeta): numbe
     h += TITLE_LINE_H_PX * titleLines;
   }
   if (meta.movetextLength > 0) {
-    const charsPerLine = Math.max(10, Math.floor(boardSize / MOVETEXT_CHAR_W_PX));
+    const charsPerLine = Math.max(
+      10,
+      Math.floor(boardSize / MOVETEXT_CHAR_W_PX),
+    );
     const lines = Math.max(1, Math.ceil(meta.movetextLength / charsPerLine));
     h += lines * MOVETEXT_LINE_H_PX + MOVETEXT_MARGIN_PX;
   }

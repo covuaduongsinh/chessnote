@@ -1,6 +1,10 @@
-import { describe, expect, test, vi } from "vitest";
-import { parseUciInfoLine, centipawnsToWinChance, formatScore } from "./engine/uci_protocol.ts";
 import { Chess } from "chess.js";
+import { describe, expect, test, vi } from "vitest";
+import {
+  centipawnsToWinChance,
+  formatScore,
+  parseUciInfoLine,
+} from "./engine/uci_protocol.ts";
 
 // reviewGame() calls the real Arasan WASM engine via evalPosition(), which
 // needs a running plug worker (space.readFile) that doesn't exist in this
@@ -12,7 +16,14 @@ import { Chess } from "chess.js";
 vi.mock("./engine/arasan_engine.ts", () => ({
   evalPosition: vi.fn(async (fen: string) => {
     const chess = new Chess(fen);
-    const values: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+    const values: Record<string, number> = {
+      p: 1,
+      n: 3,
+      b: 3,
+      r: 5,
+      q: 9,
+      k: 0,
+    };
     let material = 0;
     for (const row of chess.board()) {
       for (const sq of row) {
@@ -20,7 +31,14 @@ vi.mock("./engine/arasan_engine.ts", () => ({
       }
     }
     const stmCp = (chess.turn() === "w" ? material : -material) * 100;
-    return { bestMove: null, scoreCp: stmCp, mateIn: null, depth: 1, pv: [], raw: [] };
+    return {
+      bestMove: null,
+      scoreCp: stmCp,
+      mateIn: null,
+      depth: 1,
+      pv: [],
+      raw: [],
+    };
   }),
 }));
 
@@ -28,7 +46,8 @@ const { reviewGame, buildMoveList } = await import("./engine/game_reviewer.ts");
 
 describe("Chess Engine & Game Review Unit Tests", () => {
   test("parseUciInfoLine correctly parses depth, score cp, nodes, pv", () => {
-    const line = "info depth 16 seldepth 22 score cp 145 nodes 152340 nps 1200000 time 127 pv e2e4 c7c5 g1f3";
+    const line =
+      "info depth 16 seldepth 22 score cp 145 nodes 152340 nps 1200000 time 127 pv e2e4 c7c5 g1f3";
     const info = parseUciInfoLine(line);
 
     expect(info).not.toBeNull();
@@ -79,12 +98,17 @@ describe("Chess Engine & Game Review Unit Tests", () => {
     // The first 6 plies fall under the "book" cutoff regardless of engine
     // output; only the mating move (ply index 6) exercises real
     // classification logic against the mocked engine above.
-    expect(report.moves[6].classification === "brilliant" || report.moves[6].classification === "best")
-      .toBe(true);
+    expect(
+      report.moves[6].classification === "brilliant" ||
+        report.moves[6].classification === "best",
+    ).toBe(true);
     expect(report.moves[6].scoreAfter).toBeGreaterThan(500); // decisively winning for White after mate
     expect(report.advantageGraph.length).toBe(7);
     expect(
-      report.whiteStats.best + report.whiteStats.good + report.whiteStats.brilliant + report.whiteStats.book,
+      report.whiteStats.best +
+        report.whiteStats.good +
+        report.whiteStats.brilliant +
+        report.whiteStats.book,
     ).toBeGreaterThan(0);
     expect(report.whiteAccuracy).toBeGreaterThan(70);
     expect(report.blackAccuracy).toBeLessThanOrEqual(100);

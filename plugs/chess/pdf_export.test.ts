@@ -7,7 +7,9 @@ import { parseMarkdown } from "../../client/markdown_parser/parser.ts";
 // its own tests for. `parseMarkdown` uses the real parser: the pagination
 // walk needs a real `ParseTree` shape (top-level block nodes with correct
 // `from`/`to`, `FencedCode`/`CodeInfo`/`CodeText`) to find and place anything.
-const markdownToHtmlMock = vi.fn(async (text: string) => `<HTML>${text}</HTML>`);
+const markdownToHtmlMock = vi.fn(
+  async (text: string) => `<HTML>${text}</HTML>`,
+);
 vi.mock("@silverbulletmd/silverbullet/syscalls", () => ({
   markdown: {
     parseMarkdown: (text: string) => parseMarkdown(text),
@@ -23,7 +25,9 @@ const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
  * looser substitute for asserting a single call's exact argument, since a
  * page's top-level blocks can now be batched into more than one call. */
 function allMarkdownInputs() {
-  return markdownToHtmlMock.mock.calls.map((c) => c[0] as string).join("\n---\n");
+  return markdownToHtmlMock.mock.calls
+    .map((c) => c[0] as string)
+    .join("\n---\n");
 }
 
 describe("renderPageForPdf", () => {
@@ -91,40 +95,54 @@ describe("renderPageForPdf", () => {
       ].join("\n");
 
     test("with no tag, still shows the starting position (32 pieces)", async () => {
-      const html = await renderPageForPdf("```pgn\n" + pgnWithCaptures() + "\n```");
+      const html = await renderPageForPdf(
+        "```pgn\n" + pgnWithCaptures() + "\n```",
+      );
       expect(pieceCount(html)).toBe(32);
       expect(html).not.toContain("sau nước");
     });
 
     test('"2" (and "2w") show the position after White\'s move 2', async () => {
-      const html = await renderPageForPdf("```pgn\n" + pgnWithCaptures("2") + "\n```");
+      const html = await renderPageForPdf(
+        "```pgn\n" + pgnWithCaptures("2") + "\n```",
+      );
       expect(pieceCount(html)).toBe(31);
       expect(html).toContain("Alice vs Bob (*) — sau nước 2");
 
-      const htmlW = await renderPageForPdf("```pgn\n" + pgnWithCaptures("2w") + "\n```");
+      const htmlW = await renderPageForPdf(
+        "```pgn\n" + pgnWithCaptures("2w") + "\n```",
+      );
       expect(pieceCount(htmlW)).toBe(31);
     });
 
     test('"2b" shows the position after Black\'s move 2', async () => {
-      const html = await renderPageForPdf("```pgn\n" + pgnWithCaptures("2b") + "\n```");
+      const html = await renderPageForPdf(
+        "```pgn\n" + pgnWithCaptures("2b") + "\n```",
+      );
       expect(pieceCount(html)).toBe(30);
       expect(html).toContain("sau nước đen 2");
     });
 
     test('"last" shows the game\'s final move', async () => {
-      const html = await renderPageForPdf("```pgn\n" + pgnWithCaptures("last") + "\n```");
+      const html = await renderPageForPdf(
+        "```pgn\n" + pgnWithCaptures("last") + "\n```",
+      );
       expect(pieceCount(html)).toBe(30);
       expect(html).toContain("sau nước đen 2");
     });
 
     test("a move number past the game's end falls back to the last actual move", async () => {
-      const html = await renderPageForPdf("```pgn\n" + pgnWithCaptures("20") + "\n```");
+      const html = await renderPageForPdf(
+        "```pgn\n" + pgnWithCaptures("20") + "\n```",
+      );
       expect(pieceCount(html)).toBe(30);
       expect(html).toContain("sau nước đen 2");
     });
 
     test("a nonsense value falls back to the starting position", async () => {
-      const html = await renderPageForPdf("```pgn\n" + pgnWithCaptures("abc") + "\n```");
+      const html = await renderPageForPdf(
+        "```pgn\n" + pgnWithCaptures("abc") + "\n```",
+      );
       expect(pieceCount(html)).toBe(32);
       expect(html).not.toContain("sau nước");
     });
@@ -179,7 +197,9 @@ describe("renderPageForPdf", () => {
     // Count actual board *elements*, not the class name — the embedded
     // <style> block also references ".chessnote-static-board" in several
     // selectors, so a bare substring match over-counts.
-    expect((html.match(/<div class="chessnote-static-board">/g) || []).length).toBe(2);
+    expect(
+      (html.match(/<div class="chessnote-static-board">/g) || []).length,
+    ).toBe(2);
   });
 
   test("a code fence in an unrelated language is left as-is", async () => {
@@ -254,7 +274,9 @@ describe("renderPageForPdf", () => {
         (_, i) => `\`\`\`fen\n${START_FEN}\n\`\`\`${i < 5 ? "\n\n" : ""}`,
       ).join("");
       const html = await renderPageForPdf(boards);
-      expect((html.match(/<div class="chessnote-static-board">/g) || []).length).toBe(6);
+      expect(
+        (html.match(/<div class="chessnote-static-board">/g) || []).length,
+      ).toBe(6);
       const pageCount = (html.match(/class="pdf-page"/g) || []).length;
       expect(pageCount).toBeGreaterThan(1);
     });
@@ -263,14 +285,18 @@ describe("renderPageForPdf", () => {
   describe("CSS regressions (fixes for cut-across-pages and non-square boards)", () => {
     test(".chess-board keeps its own aspect-ratio (makes the whole board square)", async () => {
       const html = await renderPageForPdf("# No boards");
-      const rule = html.match(/\.chessnote-static-board \.chess-board\s*\{[^}]*\}/);
+      const rule = html.match(
+        /\.chessnote-static-board \.chess-board\s*\{[^}]*\}/,
+      );
       expect(rule).not.toBeNull();
       expect(rule![0]).toContain("aspect-ratio: 1 / 1");
     });
 
     test(".chess-sq no longer has a redundant aspect-ratio/height:auto", async () => {
       const html = await renderPageForPdf("# No boards");
-      const rule = html.match(/\.chessnote-static-board \.chess-sq\s*\{[^}]*\}/);
+      const rule = html.match(
+        /\.chessnote-static-board \.chess-sq\s*\{[^}]*\}/,
+      );
       expect(rule).not.toBeNull();
       expect(rule![0]).not.toContain("aspect-ratio");
       expect(rule![0]).not.toContain("height: auto");

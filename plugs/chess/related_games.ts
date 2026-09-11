@@ -43,7 +43,10 @@ export function findRelatedGames(
   limit = 5,
 ): RelatedGameMatch[] {
   const currentNames = new Set(
-    [current.white, current.black].map(meaningfulName).filter((n): n is string => n !== null).map((n) => n.toLowerCase()),
+    [current.white, current.black]
+      .map(meaningfulName)
+      .filter((n): n is string => n !== null)
+      .map((n) => n.toLowerCase()),
   );
 
   const results: RelatedGameMatch[] = [];
@@ -61,7 +64,9 @@ export function findRelatedGames(
     const otherNames = [other.white, other.black]
       .map(meaningfulName)
       .filter((n): n is string => n !== null);
-    const sharedNames = otherNames.filter((n) => currentNames.has(n.toLowerCase()));
+    const sharedNames = otherNames.filter((n) =>
+      currentNames.has(n.toLowerCase()),
+    );
     if (sharedNames.length > 0) {
       score += 2;
       reasons.push(`cùng người chơi: ${[...new Set(sharedNames)].join(", ")}`);

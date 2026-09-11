@@ -15,17 +15,19 @@
 // cache cũ của đúng trang đó — không cần tự cài cơ chế phát hiện "PGN đã đổi".
 import { editor, index, space } from "@silverbulletmd/silverbullet/syscalls";
 import type { ObjectValue } from "@silverbulletmd/silverbullet/type/index";
-import type { ChessGameFields, ChessGameObject } from "../index.ts";
+import { EngineNotInstalledError } from "../engine/arasan_engine.ts";
 import {
-  EngineNotInstalledError,
-} from "../engine/arasan_engine.ts";
-import {
-  reviewGame,
   type GameReviewReport,
   type MoveClassification,
+  reviewGame,
 } from "../engine/game_reviewer.ts";
+import type { ChessGameFields, ChessGameObject } from "../index.ts";
 import { aiAsk } from "./bridge.ts";
-import { ANTI_HALLUCINATION_RULE, CLASSIFICATION_VI, pickTurningPoints } from "./coach.ts";
+import {
+  ANTI_HALLUCINATION_RULE,
+  CLASSIFICATION_VI,
+  pickTurningPoints,
+} from "./coach.ts";
 
 const REVIEW_TAG = "chess-game-review";
 const ENGINE_REVIEW_DEPTH = 12;
@@ -161,7 +163,10 @@ export function aggregateTrends(
       gameErrorCount++;
     }
     if (game.eco && gameErrorCount > 0) {
-      ecoErrorTally.set(game.eco, (ecoErrorTally.get(game.eco) ?? 0) + gameErrorCount);
+      ecoErrorTally.set(
+        game.eco,
+        (ecoErrorTally.get(game.eco) ?? 0) + gameErrorCount,
+      );
     }
   }
 
@@ -185,7 +190,10 @@ export function aggregateTrends(
 export function buildTrendsPrompt(stats: TrendStats): string {
   const errorStatsLine = Object.entries(stats.errorCounts)
     .filter(([, count]) => count > 0)
-    .map(([cls, count]) => `${CLASSIFICATION_VI[cls as MoveClassification]}: ${count}`)
+    .map(
+      ([cls, count]) =>
+        `${CLASSIFICATION_VI[cls as MoveClassification]}: ${count}`,
+    )
     .join(", ");
 
   const phaseLine =
@@ -194,7 +202,9 @@ export function buildTrendsPrompt(stats: TrendStats): string {
     `tàn cuộc: ${stats.phaseErrorCounts.endgame}`;
 
   const ecoLines = stats.ecoErrorCounts.length
-    ? stats.ecoErrorCounts.map((e) => `  - ${e.eco}: ${e.count} lỗi (sai lầm/blunder)`)
+    ? stats.ecoErrorCounts.map(
+        (e) => `  - ${e.eco}: ${e.count} lỗi (sai lầm/blunder)`,
+      )
     : ["  - (không đủ dữ liệu ECO để nhóm theo khai cuộc)"];
 
   const lines = [
@@ -230,27 +240,38 @@ export async function analyzeTrends(stats: TrendStats) {
 function formatDateForPageName(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   // Không dùng ":" — không hợp lệ trong tên file trên Windows.
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-    `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`
+  );
 }
 
 export function renderTrendsReportMarkdown(
   stats: TrendStats,
   aiText: string | undefined,
-  meta: { totalGames: number; skipped: number; reviewedNow: number; fromCache: number },
+  meta: {
+    totalGames: number;
+    skipped: number;
+    reviewedNow: number;
+    fromCache: number;
+  },
 ): string {
   const errorStatsLine = Object.entries(stats.errorCounts)
     .filter(([, count]) => count > 0)
-    .map(([cls, count]) => `**${CLASSIFICATION_VI[cls as MoveClassification]}**: ${count}`)
+    .map(
+      ([cls, count]) =>
+        `**${CLASSIFICATION_VI[cls as MoveClassification]}**: ${count}`,
+    )
     .join(" · ");
 
   const ecoLines = stats.ecoErrorCounts.length
     ? stats.ecoErrorCounts.map((e) => `- ${e.eco}: ${e.count} lỗi`).join("\n")
     : "- (không đủ dữ liệu ECO)";
 
-  const skippedNote = meta.skipped > 0
-    ? `\n\n> ⚠️ Bỏ qua ${meta.skipped} ván do lỗi khi phân tích (xem thông báo lúc chạy lệnh).`
-    : "";
+  const skippedNote =
+    meta.skipped > 0
+      ? `\n\n> ⚠️ Bỏ qua ${meta.skipped} ván do lỗi khi phân tích (xem thông báo lúc chạy lệnh).`
+      : "";
 
   return `# Phân tích xu hướng nhiều ván
 
@@ -334,7 +355,11 @@ export async function commandAnalyzeTrends() {
         return;
       }
       skipped++;
-      console.warn("[chess trends]", `Bỏ qua ván ${game.ref}:`, (e as Error).message);
+      console.warn(
+        "[chess trends]",
+        `Bỏ qua ván ${game.ref}:`,
+        (e as Error).message,
+      );
     }
   }
 
@@ -347,12 +372,16 @@ export async function commandAnalyzeTrends() {
   const ai = await analyzeTrends(stats);
 
   const reportName = `Chess/Trends/${formatDateForPageName(new Date())}`;
-  const markdown = renderTrendsReportMarkdown(stats, ai.ok ? ai.text : undefined, {
-    totalGames: games.length,
-    skipped,
-    reviewedNow,
-    fromCache,
-  });
+  const markdown = renderTrendsReportMarkdown(
+    stats,
+    ai.ok ? ai.text : undefined,
+    {
+      totalGames: games.length,
+      skipped,
+      reviewedNow,
+      fromCache,
+    },
+  );
   await space.writePage(reportName, markdown);
   await editor.navigate(reportName);
 
@@ -362,6 +391,9 @@ export async function commandAnalyzeTrends() {
       "warning",
     );
   } else {
-    await editor.flashNotification("Đã tạo báo cáo phân tích xu hướng.", "info");
+    await editor.flashNotification(
+      "Đã tạo báo cáo phân tích xu hướng.",
+      "info",
+    );
   }
 }

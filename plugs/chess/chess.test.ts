@@ -1,17 +1,26 @@
 import { describe, expect, test } from "vitest";
-import { applyMove, applySan, fenWidget, legalMoves, pgnWidget, puzzleWidget } from "./chess.ts";
+import {
+  applyMove,
+  applySan,
+  fenWidget,
+  legalMoves,
+  pgnWidget,
+  puzzleWidget,
+} from "./chess.ts";
 
 describe("Chess Plug Unit Tests", () => {
   test("fenWidget generates valid HTML and SVG board for starting position", async () => {
     const fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     const result = await fenWidget(fen, "TestPage");
-    
+
     expect(result).toBeDefined();
     expect(result.html).toContain("chessnote-container");
     expect(result.html).toContain("chess-board");
     expect(result.html).toContain("Flip");
     expect(result.script).toContain("initialFen");
-    expect(result.script).toContain("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR");
+    expect(result.script).toContain(
+      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR",
+    );
   });
 
   test("fenWidget handles options like orientation, title, arrows, and highlights", async () => {
@@ -20,7 +29,7 @@ describe("Chess Plug Unit Tests", () => {
 | orientation: black
 | arrows: c4-f7:red, f3-e5:green
 | highlights: f7:red, e5:green`;
-    
+
     const result = await fenWidget(fenText, "TestPage");
     expect(result.html).toContain("Traxler Counterattack");
     expect(result.script).toContain("black");
@@ -94,7 +103,9 @@ rating: 1650`;
     const result = applyMove(start, "e2", "e4") as any;
     expect(result.error).toBeUndefined();
     expect(result.san).toBe("e4");
-    expect(result.fen).toContain("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b");
+    expect(result.fen).toContain(
+      "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b",
+    );
     expect(result.turn).toBe("b");
   });
 

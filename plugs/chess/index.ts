@@ -1,4 +1,3 @@
-import { Chess } from "chess.js";
 import {
   collectNodesOfType,
   findNodeOfType,
@@ -7,6 +6,7 @@ import {
 import { index } from "@silverbulletmd/silverbullet/syscalls";
 import type { IndexTreeEvent } from "@silverbulletmd/silverbullet/type/event";
 import type { ObjectValue } from "@silverbulletmd/silverbullet/type/index";
+import { Chess } from "chess.js";
 import { extractFrontMatter, type FrontMatter } from "../index/frontmatter.ts";
 
 /**

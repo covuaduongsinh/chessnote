@@ -1,9 +1,16 @@
+import { index, system } from "@silverbulletmd/silverbullet/syscalls";
 import { Chess } from "chess.js";
-import { index } from "@silverbulletmd/silverbullet/syscalls";
-import { CHESS_CSS, PIECE_SVGS } from "./board_renderer.ts";
+import { CHESS_CSS } from "./board_renderer.ts";
 import { buildMoveList } from "./engine/game_reviewer.ts";
 import type { ChessGameFields } from "./index.ts";
 import { findRelatedGames, type RelatedGameMatch } from "./related_games.ts";
+import {
+  BOARD_THEMES,
+  DEFAULT_BOARD_THEME,
+  generateBoardThemeCss,
+  getBoardTheme,
+} from "./themes/board_themes.ts";
+import { DEFAULT_PIECE_SET, PIECE_SETS } from "./themes/piece_sets.ts";
 
 function escapeHtml(str: string): string {
   return str
@@ -12,6 +19,57 @@ function escapeHtml(str: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+async function safeGetConfig<T>(key: string, defaultValue: T): Promise<T> {
+  try {
+    return await system.getConfig<T>(key, defaultValue);
+  } catch {
+    return defaultValue;
+  }
+}
+
+function generateThemeModalHtml(widgetId: string): string {
+  return `
+  <div class="chess-theme-modal" id="${widgetId}_theme_modal" style="display: none;">
+    <div class="chess-theme-modal-header">
+      <span>🎨 Tuỳ Chỉnh & Cài Đặt Giao Diện Cờ</span>
+      <button class="chess-theme-modal-close" id="${widgetId}_theme_close" title="Đóng">✕</button>
+    </div>
+    <div class="chess-theme-field">
+      <label for="${widgetId}_piece_select">Bộ quân cờ (Piece Set)</label>
+      <select class="chess-theme-select" id="${widgetId}_piece_select">
+        <option value="merida">Merida (Chuẩn giáo khoa / Sách báo)</option>
+        <option value="alpha">Alpha (Sách cờ châu Âu)</option>
+        <option value="leipzig">Leipzig (Truyền thống Đức)</option>
+        <option value="cburnett">Staunton Hiện đại (Cburnett)</option>
+        <option value="maestro">Maestro (Tạp chí FIDE / Informator)</option>
+        <option value="spatial">Báo in / Đơn sắc (Spatial)</option>
+      </select>
+    </div>
+    <div class="chess-theme-field">
+      <label for="${widgetId}_board_select">Màu bàn cờ (Board Theme)</label>
+      <select class="chess-theme-select" id="${widgetId}_board_select">
+        <option value="textbook">Giáo khoa / Sách báo (Textbook)</option>
+        <option value="wood">Gỗ kinh điển (Classic Wood)</option>
+        <option value="green">Xanh thi đấu (Tournament Green)</option>
+        <option value="blue">Xanh dương hiện đại (ChessBase Blue)</option>
+        <option value="maple">Gỗ óc chó cao cấp (Walnut / Maple)</option>
+        <option value="monochrome">Báo in đen trắng (Newspaper B&W)</option>
+        <option value="parchment">Giấy da cổ điển (Parchment)</option>
+        <option value="dark">Giao diện tối (Dark Slate)</option>
+      </select>
+    </div>
+    <div class="chess-theme-actions">
+      <button class="chess-theme-btn-default" id="${widgetId}_save_default_btn" title="Lưu giao diện này làm mặc định cho tất cả tài liệu">
+        ⭐ Đặt làm mặc định cho mọi tài liệu
+      </button>
+      <button class="chess-theme-btn-reset" id="${widgetId}_reset_default_btn" title="Khôi phục mặc định chuẩn Textbook & Merida">
+        🔄 Khôi phục chuẩn Textbook
+      </button>
+      <div class="chess-theme-status" id="${widgetId}_theme_status" style="display: none;"></div>
+    </div>
+  </div>`;
 }
 
 /** Compact error state shown instead of a board when input can't be parsed. */
@@ -42,7 +100,11 @@ export function legalMoves(
   try {
     const chess = new Chess(fen);
     const moves = chess.moves({ square: square as any, verbose: true });
-    return moves.map((m) => ({ to: m.to, san: m.san, promotion: !!m.promotion }));
+    return moves.map((m) => ({
+      to: m.to,
+      san: m.san,
+      promotion: !!m.promotion,
+    }));
   } catch (_e) {
     return [];
   }
@@ -60,7 +122,11 @@ export interface ChessMoveResult {
   isGameOver: boolean;
 }
 
-function describeResult(chess: Chess, san: string, captured?: string): ChessMoveResult {
+function describeResult(
+  chess: Chess,
+  san: string,
+  captured?: string,
+): ChessMoveResult {
   return {
     fen: chess.fen(),
     san,
@@ -117,11 +183,24 @@ export function applySan(
  */
 export async function fenWidget(bodyText: string, _pageName: string) {
   const lines = bodyText.trim().split("\n");
-  let fen = lines[0].trim();
+  const fen = lines[0].trim();
   let orientation: "white" | "black" = "white";
   let title = "Chess Position";
   const arrows: string[] = [];
   const highlights: Record<string, string> = {};
+
+  const globalPieceSet = await safeGetConfig<string>(
+    "chess.pieceSet",
+    DEFAULT_PIECE_SET,
+  );
+  const globalBoardTheme = await safeGetConfig<string>(
+    "chess.boardTheme",
+    DEFAULT_BOARD_THEME,
+  );
+  let blockPieceSet = globalPieceSet;
+  let blockBoardTheme = globalBoardTheme;
+  let hasExplicitPieceSet = false;
+  let hasExplicitBoardTheme = false;
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -138,6 +217,16 @@ export async function fenWidget(bodyText: string, _pageName: string) {
         const [sq, color] = hl.split(":").map((s) => s.trim());
         if (sq) highlights[sq] = color || "yellow";
       }
+    } else if (line.startsWith("| pieceSet:") || line.startsWith("| pieces:")) {
+      blockPieceSet = line.replace(/\| (pieceSet|pieces):/, "").trim();
+      hasExplicitPieceSet = true;
+    } else if (
+      line.startsWith("| boardTheme:") ||
+      line.startsWith("| theme:") ||
+      line.startsWith("| board:")
+    ) {
+      blockBoardTheme = line.replace(/\| (boardTheme|theme|board):/, "").trim();
+      hasExplicitBoardTheme = true;
     }
   }
 
@@ -153,10 +242,12 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   }
 
   const widgetId = `chess_fen_${Math.random().toString(36).substring(2, 9)}`;
+  const initialTheme = getBoardTheme(blockBoardTheme);
 
   const html = `
 <style>${CHESS_CSS}</style>
-<div class="chessnote-container" id="${widgetId}">
+<div class="chessnote-container" id="${widgetId}" style="${generateBoardThemeCss(initialTheme)}">
+  ${generateThemeModalHtml(widgetId)}
   <div class="chess-header">
     <div class="chess-title">${escapeHtml(title)}</div>
     <div class="chess-subtitle">FEN Interactive Board • Arasan Engine (NNUE, WASM)</div>
@@ -176,6 +267,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
       <div class="chess-error-banner" id="${widgetId}_error" style="display: none;"></div>
       <div class="chess-controls">
         <button class="chess-btn btn-engine" id="${widgetId}_eval_toggle">⚡ Engine Eval</button>
+        <button class="chess-btn" id="${widgetId}_theme_btn" title="Tuỳ chỉnh bàn cờ và quân cờ">🎨 Theme</button>
         <button class="chess-btn" id="${widgetId}_flip">🔄 Flip</button>
         <button class="chess-btn" id="${widgetId}_reset">⏮ Reset</button>
         <button class="chess-btn" id="${widgetId}_copy_fen">📋 Copy FEN</button>
@@ -200,12 +292,24 @@ export async function fenWidget(bodyText: string, _pageName: string) {
 
   const script = `
 (function() {
-  const PIECE_SVGS = ${JSON.stringify(PIECE_SVGS)};
+  const PIECE_SETS = ${JSON.stringify(PIECE_SETS)};
+  const BOARD_THEMES = ${JSON.stringify(BOARD_THEMES)};
   const initialFen = ${JSON.stringify(fen)};
   let currentFen = initialFen;
   let orientation = ${JSON.stringify(orientation)};
   const baseArrows = ${JSON.stringify(arrows)};
   const highlights = ${JSON.stringify(highlights)};
+  const hasExplicitPieceSet = ${JSON.stringify(hasExplicitPieceSet)};
+  const hasExplicitBoardTheme = ${JSON.stringify(hasExplicitBoardTheme)};
+
+  let currentPieceSet = ${JSON.stringify(blockPieceSet)};
+  let currentBoardTheme = ${JSON.stringify(blockBoardTheme)};
+  try {
+    const defaultPiece = localStorage.getItem("chessnote_default_piece_set") || localStorage.getItem("chessnote_piece_set");
+    const defaultBoard = localStorage.getItem("chessnote_default_board_theme") || localStorage.getItem("chessnote_board_theme");
+    if (!hasExplicitPieceSet && defaultPiece && PIECE_SETS[defaultPiece]) currentPieceSet = defaultPiece;
+    if (!hasExplicitBoardTheme && defaultBoard && BOARD_THEMES[defaultBoard]) currentBoardTheme = defaultBoard;
+  } catch (_e) {}
   
   let selectedSquare = null;
   let legalMoves = []; // [{to, san, promotion}] for the currently selected square
@@ -229,6 +333,124 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   const engineScoreEl = document.getElementById("${widgetId}_engine_score");
   const bestMoveEl = document.getElementById("${widgetId}_best_move");
 
+  const themeBtn = document.getElementById("${widgetId}_theme_btn");
+  const themeModal = document.getElementById("${widgetId}_theme_modal");
+  const themeCloseBtn = document.getElementById("${widgetId}_theme_close");
+  const pieceSelect = document.getElementById("${widgetId}_piece_select");
+  const boardSelect = document.getElementById("${widgetId}_board_select");
+  const saveDefaultBtn = document.getElementById("${widgetId}_save_default_btn");
+  const resetDefaultBtn = document.getElementById("${widgetId}_reset_default_btn");
+  const themeStatus = document.getElementById("${widgetId}_theme_status");
+
+  if (pieceSelect) pieceSelect.value = currentPieceSet;
+  if (boardSelect) boardSelect.value = currentBoardTheme;
+
+  function applyTheme(boardKey, pieceKey, saveAsDefault = false) {
+    if (BOARD_THEMES[boardKey]) currentBoardTheme = boardKey;
+    if (PIECE_SETS[pieceKey]) currentPieceSet = pieceKey;
+    try {
+      localStorage.setItem("chessnote_piece_set", currentPieceSet);
+      localStorage.setItem("chessnote_board_theme", currentBoardTheme);
+      if (saveAsDefault) {
+        localStorage.setItem("chessnote_default_piece_set", currentPieceSet);
+        localStorage.setItem("chessnote_default_board_theme", currentBoardTheme);
+      }
+    } catch (_e) {}
+
+    const theme = BOARD_THEMES[currentBoardTheme] || BOARD_THEMES["textbook"];
+    const container = document.getElementById("${widgetId}");
+    if (container) {
+      container.style.setProperty("--sq-light", theme.light);
+      container.style.setProperty("--sq-dark", theme.dark);
+      container.style.setProperty("--board-border", theme.border);
+      container.style.setProperty("--sq-select", theme.select);
+      container.style.setProperty("--sq-highlight", theme.highlight);
+      container.style.setProperty("--sq-dest", theme.dest);
+    }
+    renderBoard();
+  }
+
+  // Initial theme application
+  applyTheme(currentBoardTheme, currentPieceSet, false);
+
+  if (themeBtn && themeModal) {
+    themeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      themeModal.style.display = themeModal.style.display === "none" ? "flex" : "none";
+    });
+  }
+  if (themeCloseBtn && themeModal) {
+    themeCloseBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      themeModal.style.display = "none";
+    });
+  }
+  if (pieceSelect) {
+    pieceSelect.addEventListener("change", (e) => {
+      applyTheme(boardSelect ? boardSelect.value : currentBoardTheme, e.target.value, false);
+    });
+  }
+  if (boardSelect) {
+    boardSelect.addEventListener("change", (e) => {
+      applyTheme(e.target.value, pieceSelect ? pieceSelect.value : currentPieceSet, false);
+    });
+  }
+  if (saveDefaultBtn) {
+    saveDefaultBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const p = pieceSelect ? pieceSelect.value : currentPieceSet;
+      const b = boardSelect ? boardSelect.value : currentBoardTheme;
+      applyTheme(b, p, true);
+      try {
+        window.dispatchEvent(new CustomEvent("chessnote_theme_changed", {
+          detail: { pieceSet: p, boardTheme: b }
+        }));
+      } catch (_e) {}
+      if (themeStatus) {
+        themeStatus.textContent = "✓ Đã lưu làm mặc định cho mọi tài liệu!";
+        themeStatus.style.display = "block";
+        setTimeout(() => { themeStatus.style.display = "none"; }, 3000);
+      }
+    });
+  }
+  if (resetDefaultBtn) {
+    resetDefaultBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      try {
+        localStorage.removeItem("chessnote_default_piece_set");
+        localStorage.removeItem("chessnote_default_board_theme");
+        localStorage.removeItem("chessnote_piece_set");
+        localStorage.removeItem("chessnote_board_theme");
+      } catch (_e) {}
+      if (pieceSelect) pieceSelect.value = "merida";
+      if (boardSelect) boardSelect.value = "textbook";
+      applyTheme("textbook", "merida", false);
+      try {
+        window.dispatchEvent(new CustomEvent("chessnote_theme_changed", {
+          detail: { pieceSet: "merida", boardTheme: "textbook" }
+        }));
+      } catch (_e) {}
+      if (themeStatus) {
+        themeStatus.textContent = "✓ Đã khôi phục chuẩn Textbook & Merida!";
+        themeStatus.style.display = "block";
+        setTimeout(() => { themeStatus.style.display = "none"; }, 3000);
+      }
+    });
+  }
+
+  window.addEventListener("chessnote_theme_changed", (e) => {
+    if (!e || !e.detail) return;
+    if (!hasExplicitBoardTheme && e.detail.boardTheme) {
+      currentBoardTheme = e.detail.boardTheme;
+      if (boardSelect) boardSelect.value = currentBoardTheme;
+    }
+    if (!hasExplicitPieceSet && e.detail.pieceSet) {
+      currentPieceSet = e.detail.pieceSet;
+      if (pieceSelect) pieceSelect.value = currentPieceSet;
+    }
+    applyTheme(currentBoardTheme, currentPieceSet, false);
+  });
+
   function showError(msg) {
     if (!msg) {
       errorEl.style.display = "none";
@@ -245,18 +467,14 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     return null;
   }
 
-  // Small Q/R/B/N picker shown over the board when a pawn move needs a
-  // promotion piece chosen before we know which move to send to chess.js.
-  // \`moverColor\` is "w"/"b" for the side actually making the move (the
-  // active color in the FEN *before* the move) — not the board orientation,
-  // which is just which way the board is visually flipped.
   function askPromotion(moverColor) {
     return new Promise((resolve) => {
       const picker = document.createElement("div");
       picker.className = "promotion-picker";
+      const currentPieces = PIECE_SETS[currentPieceSet] || PIECE_SETS["merida"];
       ["q", "r", "b", "n"].forEach((p) => {
         const btn = document.createElement("button");
-        btn.innerHTML = PIECE_SVGS[moverColor + p.toUpperCase()] || p;
+        btn.innerHTML = currentPieces[moverColor + p.toUpperCase()] || p;
         btn.addEventListener("click", () => {
           picker.remove();
           resolve(p);
@@ -288,11 +506,6 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     return board;
   }
 
-  // Real Arasan (NNUE, WASM) analysis via the chess.engineEval syscall — see
-  // plugs/chess/engine/arasan_engine.ts. Requires the optional "Chess
-  // Engine" Library to be installed (~26MB: engine + neural network); if
-  // it isn't, the syscall rejects and we show that plainly instead of
-  // silently falling back to a fake number.
   let lastEvalFen = null;
   let evalRequestSeq = 0;
 
@@ -304,7 +517,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     bestMoveEl.innerText = "…";
     try {
       const result = await syscall("chess.engineEval", currentFen, 12);
-      if (mySeq !== evalRequestSeq) return; // a newer position was requested meanwhile
+      if (mySeq !== evalRequestSeq) return;
       lastEvalFen = currentFen;
       let scoreStr;
       let winChance;
@@ -341,6 +554,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     const ranks = orientation === "white" ? [8,7,6,5,4,3,2,1] : [1,2,3,4,5,6,7,8];
     const destSquares = {};
     legalMoves.forEach((m) => { destSquares[m.to] = m; });
+    const currentPieces = PIECE_SETS[currentPieceSet] || PIECE_SETS["merida"];
 
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
@@ -368,7 +582,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
           const piece = boardState[sq];
           const pieceDiv = document.createElement("div");
           pieceDiv.className = "chess-piece";
-          pieceDiv.innerHTML = PIECE_SVGS[piece] || "";
+          pieceDiv.innerHTML = currentPieces[piece] || "";
           sqDiv.appendChild(pieceDiv);
         }
 
@@ -605,6 +819,23 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   const date = header["Date"] || "";
   const eco = header["ECO"] || "";
 
+  const globalPieceSet = await safeGetConfig<string>(
+    "chess.pieceSet",
+    DEFAULT_PIECE_SET,
+  );
+  const globalBoardTheme = await safeGetConfig<string>(
+    "chess.boardTheme",
+    DEFAULT_BOARD_THEME,
+  );
+  const hasExplicitPieceSet = Boolean(header["PieceSet"] || header["Pieces"]);
+  const hasExplicitBoardTheme = Boolean(
+    header["BoardTheme"] || header["Theme"],
+  );
+  const blockPieceSet =
+    header["PieceSet"] || header["Pieces"] || globalPieceSet;
+  const blockBoardTheme =
+    header["BoardTheme"] || header["Theme"] || globalBoardTheme;
+
   // Cheap, chess.js-only move list for navigation — the real (engine-backed)
   // full review is fetched lazily via the chess.reviewGame syscall, only
   // when the user clicks "Game Review" (see the widget script below).
@@ -616,28 +847,43 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   // chưa sẵn sàng hoặc lỗi tạm thời (vd. đang trong lần index đầu tiên).
   let relatedGames: RelatedGameMatch[] = [];
   try {
-    const allGames = await index.queryLuaObjects<ChessGameFields>("chess-game", {});
-    relatedGames = findRelatedGames({ page: pageName, white, black, eco }, allGames);
+    const allGames = await index.queryLuaObjects<ChessGameFields>(
+      "chess-game",
+      {},
+    );
+    relatedGames = findRelatedGames(
+      { page: pageName, white, black, eco },
+      allGames,
+    );
   } catch {
     relatedGames = [];
   }
 
   const initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w KQkq - 0 1";
   const widgetId = `chess_pgn_${Math.random().toString(36).substring(2, 9)}`;
+  const initialTheme = getBoardTheme(blockBoardTheme);
 
-  const relatedGamesHtml = relatedGames.length === 0 ? "" : `
+  const relatedGamesHtml =
+    relatedGames.length === 0
+      ? ""
+      : `
       <div class="chess-related-games">
         <div class="chess-related-title">🔗 Ván liên quan</div>
-        ${relatedGames.map((g) => `
+        ${relatedGames
+          .map(
+            (g) => `
         <div class="chess-related-item">
           <a href="/${encodeURIComponent(g.page)}" target="_top">${escapeHtml(g.white)} vs ${escapeHtml(g.black)} (${escapeHtml(g.result)})</a>
           <span class="chess-related-reason">${escapeHtml(g.reasons.join(", "))}</span>
-        </div>`).join("")}
+        </div>`,
+          )
+          .join("")}
       </div>`;
 
   const html = `
 <style>${CHESS_CSS}</style>
-<div class="chessnote-container" id="${widgetId}">
+<div class="chessnote-container" id="${widgetId}" style="${generateBoardThemeCss(initialTheme)}">
+  ${generateThemeModalHtml(widgetId)}
   <div class="chess-header">
     <div class="chess-title">${escapeHtml(white)} vs ${escapeHtml(black)} (${escapeHtml(result)})</div>
     <div class="chess-subtitle">${escapeHtml(event)} ${date ? "• " + escapeHtml(date) : ""} ${eco ? "• ECO: " + escapeHtml(eco) : ""}</div>
@@ -657,6 +903,7 @@ export async function pgnWidget(bodyText: string, pageName: string) {
       <div class="chess-controls">
         <button class="chess-btn btn-engine" id="${widgetId}_eval_toggle">⚡ Engine Eval</button>
         <button class="chess-btn" id="${widgetId}_review_toggle">📊 Game Review</button>
+        <button class="chess-btn" id="${widgetId}_theme_btn" title="Tuỳ chỉnh bàn cờ và quân cờ">🎨 Theme</button>
         <button class="chess-btn btn-ai" id="${widgetId}_ai_explain_toggle">🧑‍🏫 AI Giải thích</button>
         <button class="chess-btn btn-ai" id="${widgetId}_ai_annotate_toggle">📝 AI Bình luận ván</button>
         <button class="chess-btn btn-ai" id="${widgetId}_ai_tag_toggle">🏷️ AI Gợi ý tag</button>
@@ -673,12 +920,12 @@ export async function pgnWidget(bodyText: string, pageName: string) {
           <span class="accuracy-white">⚪ ${escapeHtml(white)}: <strong id="${widgetId}_white_acc">-</strong></span>
           <span class="accuracy-black">⚫ ${escapeHtml(black)}: <strong id="${widgetId}_black_acc">-</strong></span>
         </div>
-        <div class="review-status" id="${widgetId}_review_status"></div>
+        <div class="review-status-line" id="${widgetId}_review_status"></div>
       </div>
 
-      <div class="ai-coach-panel" id="${widgetId}_ai_explain_panel" style="display: none;"></div>
-      <div class="ai-coach-panel" id="${widgetId}_ai_annotate_panel" style="display: none;"></div>
-      <div class="ai-coach-panel" id="${widgetId}_ai_tag_panel" style="display: none;"></div>
+      <div class="ai-explain-panel" id="${widgetId}_ai_explain_panel" style="display: none;"></div>
+      <div class="ai-annotate-panel" id="${widgetId}_ai_annotate_panel" style="display: none;"></div>
+      <div class="ai-tag-panel" id="${widgetId}_ai_tag_panel" style="display: none;"></div>
 
       <div class="chess-engine-panel" id="${widgetId}_engine_panel" style="display: none;">
         <div class="engine-line">
@@ -687,11 +934,11 @@ export async function pgnWidget(bodyText: string, pageName: string) {
         </div>
       </div>
 
-      <div class="chess-pgn-tree" id="${widgetId}_tree"></div>
-      <div class="fen-footer">
-        <span id="${widgetId}_fen_text">${escapeHtml(initialFen)}</span>
-      </div>
+      <div class="chess-tree" id="${widgetId}_tree"></div>
       ${relatedGamesHtml}
+      <div class="fen-footer">
+        <span id="${widgetId}_fen_text">${initialFen}</span>
+      </div>
     </div>
   </div>
 </div>
@@ -699,12 +946,24 @@ export async function pgnWidget(bodyText: string, pageName: string) {
 
   const script = `
 (function() {
-  const PIECE_SVGS = ${JSON.stringify(PIECE_SVGS)};
+  const PIECE_SETS = ${JSON.stringify(PIECE_SETS)};
+  const BOARD_THEMES = ${JSON.stringify(BOARD_THEMES)};
   const initialFen = ${JSON.stringify(initialFen)};
   const reviewedMoves = ${JSON.stringify(moveList)};
   const rawPgn = ${JSON.stringify(bodyText.trim())};
   const gameHeaders = ${JSON.stringify({ white, black, result, eco, event })};
   const pageName = ${JSON.stringify(pageName)};
+  const hasExplicitPieceSet = ${JSON.stringify(hasExplicitPieceSet)};
+  const hasExplicitBoardTheme = ${JSON.stringify(hasExplicitBoardTheme)};
+
+  let currentPieceSet = ${JSON.stringify(blockPieceSet)};
+  let currentBoardTheme = ${JSON.stringify(blockBoardTheme)};
+  try {
+    const defaultPiece = localStorage.getItem("chessnote_default_piece_set") || localStorage.getItem("chessnote_piece_set");
+    const defaultBoard = localStorage.getItem("chessnote_default_board_theme") || localStorage.getItem("chessnote_board_theme");
+    if (!hasExplicitPieceSet && defaultPiece && PIECE_SETS[defaultPiece]) currentPieceSet = defaultPiece;
+    if (!hasExplicitBoardTheme && defaultBoard && BOARD_THEMES[defaultBoard]) currentBoardTheme = defaultBoard;
+  } catch (_e) {}
 
   let currentIdx = -1;
   let orientation = "white";
@@ -759,6 +1018,124 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   const aiAnnotatePanel = document.getElementById("${widgetId}_ai_annotate_panel");
   const aiTagToggleBtn = document.getElementById("${widgetId}_ai_tag_toggle");
   const aiTagPanel = document.getElementById("${widgetId}_ai_tag_panel");
+
+  const themeBtn = document.getElementById("${widgetId}_theme_btn");
+  const themeModal = document.getElementById("${widgetId}_theme_modal");
+  const themeCloseBtn = document.getElementById("${widgetId}_theme_close");
+  const pieceSelect = document.getElementById("${widgetId}_piece_select");
+  const boardSelect = document.getElementById("${widgetId}_board_select");
+  const saveDefaultBtn = document.getElementById("${widgetId}_save_default_btn");
+  const resetDefaultBtn = document.getElementById("${widgetId}_reset_default_btn");
+  const themeStatus = document.getElementById("${widgetId}_theme_status");
+
+  if (pieceSelect) pieceSelect.value = currentPieceSet;
+  if (boardSelect) boardSelect.value = currentBoardTheme;
+
+  function applyTheme(boardKey, pieceKey, saveAsDefault = false) {
+    if (BOARD_THEMES[boardKey]) currentBoardTheme = boardKey;
+    if (PIECE_SETS[pieceKey]) currentPieceSet = pieceKey;
+    try {
+      localStorage.setItem("chessnote_piece_set", currentPieceSet);
+      localStorage.setItem("chessnote_board_theme", currentBoardTheme);
+      if (saveAsDefault) {
+        localStorage.setItem("chessnote_default_piece_set", currentPieceSet);
+        localStorage.setItem("chessnote_default_board_theme", currentBoardTheme);
+      }
+    } catch (_e) {}
+
+    const theme = BOARD_THEMES[currentBoardTheme] || BOARD_THEMES["textbook"];
+    const container = document.getElementById("${widgetId}");
+    if (container) {
+      container.style.setProperty("--sq-light", theme.light);
+      container.style.setProperty("--sq-dark", theme.dark);
+      container.style.setProperty("--board-border", theme.border);
+      container.style.setProperty("--sq-select", theme.select);
+      container.style.setProperty("--sq-highlight", theme.highlight);
+      container.style.setProperty("--sq-dest", theme.dest);
+    }
+    renderBoard();
+  }
+
+  // Initial theme application
+  applyTheme(currentBoardTheme, currentPieceSet, false);
+
+  if (themeBtn && themeModal) {
+    themeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      themeModal.style.display = themeModal.style.display === "none" ? "flex" : "none";
+    });
+  }
+  if (themeCloseBtn && themeModal) {
+    themeCloseBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      themeModal.style.display = "none";
+    });
+  }
+  if (pieceSelect) {
+    pieceSelect.addEventListener("change", (e) => {
+      applyTheme(boardSelect ? boardSelect.value : currentBoardTheme, e.target.value, false);
+    });
+  }
+  if (boardSelect) {
+    boardSelect.addEventListener("change", (e) => {
+      applyTheme(e.target.value, pieceSelect ? pieceSelect.value : currentPieceSet, false);
+    });
+  }
+  if (saveDefaultBtn) {
+    saveDefaultBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const p = pieceSelect ? pieceSelect.value : currentPieceSet;
+      const b = boardSelect ? boardSelect.value : currentBoardTheme;
+      applyTheme(b, p, true);
+      try {
+        window.dispatchEvent(new CustomEvent("chessnote_theme_changed", {
+          detail: { pieceSet: p, boardTheme: b }
+        }));
+      } catch (_e) {}
+      if (themeStatus) {
+        themeStatus.textContent = "✓ Đã lưu làm mặc định cho mọi tài liệu!";
+        themeStatus.style.display = "block";
+        setTimeout(() => { themeStatus.style.display = "none"; }, 3000);
+      }
+    });
+  }
+  if (resetDefaultBtn) {
+    resetDefaultBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      try {
+        localStorage.removeItem("chessnote_default_piece_set");
+        localStorage.removeItem("chessnote_default_board_theme");
+        localStorage.removeItem("chessnote_piece_set");
+        localStorage.removeItem("chessnote_board_theme");
+      } catch (_e) {}
+      if (pieceSelect) pieceSelect.value = "merida";
+      if (boardSelect) boardSelect.value = "textbook";
+      applyTheme("textbook", "merida", false);
+      try {
+        window.dispatchEvent(new CustomEvent("chessnote_theme_changed", {
+          detail: { pieceSet: "merida", boardTheme: "textbook" }
+        }));
+      } catch (_e) {}
+      if (themeStatus) {
+        themeStatus.textContent = "✓ Đã khôi phục chuẩn Textbook & Merida!";
+        themeStatus.style.display = "block";
+        setTimeout(() => { themeStatus.style.display = "none"; }, 3000);
+      }
+    });
+  }
+
+  window.addEventListener("chessnote_theme_changed", (e) => {
+    if (!e || !e.detail) return;
+    if (!hasExplicitBoardTheme && e.detail.boardTheme) {
+      currentBoardTheme = e.detail.boardTheme;
+      if (boardSelect) boardSelect.value = currentBoardTheme;
+    }
+    if (!hasExplicitPieceSet && e.detail.pieceSet) {
+      currentPieceSet = e.detail.pieceSet;
+      if (pieceSelect) pieceSelect.value = currentPieceSet;
+    }
+    applyTheme(currentBoardTheme, currentPieceSet, false);
+  });
 
   syscall("system.isCapacitor").then((v) => {
     isCapacitorEnv = v;
@@ -1000,6 +1377,7 @@ export async function pgnWidget(bodyText: string, pageName: string) {
     const boardState = parseFenBoard(currentFen);
     const files = orientation === "white" ? ["a","b","c","d","e","f","g","h"] : ["h","g","f","e","d","c","b","a"];
     const ranks = orientation === "white" ? [8,7,6,5,4,3,2,1] : [1,2,3,4,5,6,7,8];
+    const currentPieces = PIECE_SETS[currentPieceSet] || PIECE_SETS["merida"];
 
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
@@ -1016,7 +1394,7 @@ export async function pgnWidget(bodyText: string, pageName: string) {
           const piece = boardState[sq];
           const pieceDiv = document.createElement("div");
           pieceDiv.className = "chess-piece";
-          pieceDiv.innerHTML = PIECE_SVGS[piece] || "";
+          pieceDiv.innerHTML = currentPieces[piece] || "";
           sqDiv.appendChild(pieceDiv);
         }
 
@@ -1221,12 +1599,26 @@ export async function pgnWidget(bodyText: string, pageName: string) {
  */
 export async function puzzleWidget(bodyText: string, _pageName: string) {
   const lines = bodyText.trim().split("\n");
-  let fen = "r1bqk2r/pp2bppp/2n1p3/2ppP3/3P4/2PB1N2/P1P2PPP/R1BQK2R w KQkq - 0 8";
+  let fen =
+    "r1bqk2r/pp2bppp/2n1p3/2ppP3/3P4/2PB1N2/P1P2PPP/R1BQK2R w KQkq - 0 8";
   let turn = "white";
   let solutionStr = "";
   let hint = "";
   let themes = "";
   let rating = "";
+
+  const globalPieceSet = await safeGetConfig<string>(
+    "chess.pieceSet",
+    DEFAULT_PIECE_SET,
+  );
+  const globalBoardTheme = await safeGetConfig<string>(
+    "chess.boardTheme",
+    DEFAULT_BOARD_THEME,
+  );
+  let pieceSet = globalPieceSet;
+  let boardTheme = globalBoardTheme;
+  let hasExplicitPieceSet = false;
+  let hasExplicitBoardTheme = false;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -1242,6 +1634,19 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
       themes = trimmed.replace("themes:", "").trim();
     } else if (trimmed.startsWith("rating:")) {
       rating = trimmed.replace("rating:", "").trim();
+    } else if (
+      trimmed.startsWith("pieceSet:") ||
+      trimmed.startsWith("pieces:")
+    ) {
+      pieceSet = trimmed.replace(/(pieceSet|pieces):/, "").trim();
+      hasExplicitPieceSet = true;
+    } else if (
+      trimmed.startsWith("boardTheme:") ||
+      trimmed.startsWith("theme:") ||
+      trimmed.startsWith("board:")
+    ) {
+      boardTheme = trimmed.replace(/(boardTheme|theme|board):/, "").trim();
+      hasExplicitBoardTheme = true;
     }
   }
 
@@ -1264,12 +1669,17 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
     };
   }
 
-  const solutionMoves = solutionStr.split(" ").map((s) => s.trim()).filter(Boolean);
+  const solutionMoves = solutionStr
+    .split(" ")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const widgetId = `chess_puzzle_${Math.random().toString(36).substring(2, 9)}`;
+  const initialTheme = getBoardTheme(boardTheme);
 
   const html = `
 <style>${CHESS_CSS}</style>
-<div class="chessnote-container" id="${widgetId}">
+<div class="chessnote-container" id="${widgetId}" style="${generateBoardThemeCss(initialTheme)}">
+  ${generateThemeModalHtml(widgetId)}
   <div class="chess-header">
     <div class="chess-title">Tactics Puzzle ${rating ? "• Rating: " + escapeHtml(rating) : ""}</div>
     <div class="chess-subtitle">${turn === "white" ? "⚪ White to move" : "⚫ Black to move"} ${themes ? "• " + escapeHtml(themes) : ""}</div>
@@ -1285,6 +1695,7 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
       </div>
       <div class="chess-controls">
         <button class="chess-btn" id="${widgetId}_reset">🔄 Reset Puzzle</button>
+        <button class="chess-btn" id="${widgetId}_theme_btn" title="Tuỳ chỉnh bàn cờ và quân cờ">🎨 Theme</button>
         ${hint ? `<button class="chess-btn" id="${widgetId}_hint_btn">💡 Hint</button>` : ""}
         <button class="chess-btn" id="${widgetId}_solution_btn">👁 Show Solution</button>
       </div>
@@ -1301,10 +1712,22 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
 
   const script = `
 (function() {
-  const PIECE_SVGS = ${JSON.stringify(PIECE_SVGS)};
+  const PIECE_SETS = ${JSON.stringify(PIECE_SETS)};
+  const BOARD_THEMES = ${JSON.stringify(BOARD_THEMES)};
   const startFen = ${JSON.stringify(fen)};
   const solutionMoves = ${JSON.stringify(solutionMoves)};
   const orientation = ${JSON.stringify(turn)};
+  const hasExplicitPieceSet = ${JSON.stringify(hasExplicitPieceSet)};
+  const hasExplicitBoardTheme = ${JSON.stringify(hasExplicitBoardTheme)};
+
+  let currentPieceSet = ${JSON.stringify(pieceSet)};
+  let currentBoardTheme = ${JSON.stringify(boardTheme)};
+  try {
+    const defaultPiece = localStorage.getItem("chessnote_default_piece_set") || localStorage.getItem("chessnote_piece_set");
+    const defaultBoard = localStorage.getItem("chessnote_default_board_theme") || localStorage.getItem("chessnote_board_theme");
+    if (!hasExplicitPieceSet && defaultPiece && PIECE_SETS[defaultPiece]) currentPieceSet = defaultPiece;
+    if (!hasExplicitBoardTheme && defaultBoard && BOARD_THEMES[defaultBoard]) currentBoardTheme = defaultBoard;
+  } catch (_e) {}
 
   let currentFen = startFen;
   let currentStep = 0; // index into solutionMoves the solver must play next
@@ -1322,15 +1745,130 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
   const solutionBtn = document.getElementById("${widgetId}_solution_btn");
   const solutionDisplay = document.getElementById("${widgetId}_solution_display");
 
+  const themeBtn = document.getElementById("${widgetId}_theme_btn");
+  const themeModal = document.getElementById("${widgetId}_theme_modal");
+  const themeCloseBtn = document.getElementById("${widgetId}_theme_close");
+  const pieceSelect = document.getElementById("${widgetId}_piece_select");
+  const boardSelect = document.getElementById("${widgetId}_board_select");
+  const saveDefaultBtn = document.getElementById("${widgetId}_save_default_btn");
+  const resetDefaultBtn = document.getElementById("${widgetId}_reset_default_btn");
+  const themeStatus = document.getElementById("${widgetId}_theme_status");
+
+  if (pieceSelect) pieceSelect.value = currentPieceSet;
+  if (boardSelect) boardSelect.value = currentBoardTheme;
+
+  function applyTheme(boardKey, pieceKey, saveAsDefault = false) {
+    if (BOARD_THEMES[boardKey]) currentBoardTheme = boardKey;
+    if (PIECE_SETS[pieceKey]) currentPieceSet = pieceKey;
+    try {
+      localStorage.setItem("chessnote_piece_set", currentPieceSet);
+      localStorage.setItem("chessnote_board_theme", currentBoardTheme);
+      if (saveAsDefault) {
+        localStorage.setItem("chessnote_default_piece_set", currentPieceSet);
+        localStorage.setItem("chessnote_default_board_theme", currentBoardTheme);
+      }
+    } catch (_e) {}
+
+    const theme = BOARD_THEMES[currentBoardTheme] || BOARD_THEMES["textbook"];
+    const container = document.getElementById("${widgetId}");
+    if (container) {
+      container.style.setProperty("--sq-light", theme.light);
+      container.style.setProperty("--sq-dark", theme.dark);
+      container.style.setProperty("--board-border", theme.border);
+      container.style.setProperty("--sq-select", theme.select);
+      container.style.setProperty("--sq-highlight", theme.highlight);
+      container.style.setProperty("--sq-dest", theme.dest);
+    }
+    renderBoard();
+  }
+
+  // Initial theme application
+  applyTheme(currentBoardTheme, currentPieceSet, false);
+
+  if (themeBtn && themeModal) {
+    themeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      themeModal.style.display = themeModal.style.display === "none" ? "flex" : "none";
+    });
+  }
+  if (themeCloseBtn && themeModal) {
+    themeCloseBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      themeModal.style.display = "none";
+    });
+  }
+  if (pieceSelect) {
+    pieceSelect.addEventListener("change", (e) => {
+      applyTheme(boardSelect ? boardSelect.value : currentBoardTheme, e.target.value, false);
+    });
+  }
+  if (boardSelect) {
+    boardSelect.addEventListener("change", (e) => {
+      applyTheme(e.target.value, pieceSelect ? pieceSelect.value : currentPieceSet, false);
+    });
+  }
+  if (saveDefaultBtn) {
+    saveDefaultBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const p = pieceSelect ? pieceSelect.value : currentPieceSet;
+      const b = boardSelect ? boardSelect.value : currentBoardTheme;
+      applyTheme(b, p, true);
+      try {
+        window.dispatchEvent(new CustomEvent("chessnote_theme_changed", {
+          detail: { pieceSet: p, boardTheme: b }
+        }));
+      } catch (_e) {}
+      if (themeStatus) {
+        themeStatus.textContent = "✓ Đã lưu làm mặc định cho mọi tài liệu!";
+        themeStatus.style.display = "block";
+        setTimeout(() => { themeStatus.style.display = "none"; }, 3000);
+      }
+    });
+  }
+  if (resetDefaultBtn) {
+    resetDefaultBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      try {
+        localStorage.removeItem("chessnote_default_piece_set");
+        localStorage.removeItem("chessnote_default_board_theme");
+        localStorage.removeItem("chessnote_piece_set");
+        localStorage.removeItem("chessnote_board_theme");
+      } catch (_e) {}
+      if (pieceSelect) pieceSelect.value = "merida";
+      if (boardSelect) boardSelect.value = "textbook";
+      applyTheme("textbook", "merida", false);
+      try {
+        window.dispatchEvent(new CustomEvent("chessnote_theme_changed", {
+          detail: { pieceSet: "merida", boardTheme: "textbook" }
+        }));
+      } catch (_e) {}
+      if (themeStatus) {
+        themeStatus.textContent = "✓ Đã khôi phục chuẩn Textbook & Merida!";
+        themeStatus.style.display = "block";
+        setTimeout(() => { themeStatus.style.display = "none"; }, 3000);
+      }
+    });
+  }
+
+  window.addEventListener("chessnote_theme_changed", (e) => {
+    if (!e || !e.detail) return;
+    if (!hasExplicitBoardTheme && e.detail.boardTheme) {
+      currentBoardTheme = e.detail.boardTheme;
+      if (boardSelect) boardSelect.value = currentBoardTheme;
+    }
+    if (!hasExplicitPieceSet && e.detail.pieceSet) {
+      currentPieceSet = e.detail.pieceSet;
+      if (pieceSelect) pieceSelect.value = currentPieceSet;
+    }
+    applyTheme(currentBoardTheme, currentPieceSet, false);
+  });
+
   function showError(msg) {
     if (!msg) { errorEl.style.display = "none"; return; }
     errorEl.textContent = "⚠️ " + msg;
     errorEl.style.display = "block";
   }
 
-  // Compare generated SAN (always from chess.js, e.g. "Qh5#") against the
-  // author-written solution token (which may omit the trailing +/# by
-  // oversight, e.g. "Qh5") — only the check/mate suffix is allowed to differ.
   function sameSan(a, b) {
     return a.replace(/[+#]+$/, "") === b.replace(/[+#]+$/, "");
   }
@@ -1360,9 +1898,10 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
     return new Promise((resolve) => {
       const picker = document.createElement("div");
       picker.className = "promotion-picker";
+      const currentPieces = PIECE_SETS[currentPieceSet] || PIECE_SETS["merida"];
       ["q", "r", "b", "n"].forEach((p) => {
         const btn = document.createElement("button");
-        btn.innerHTML = PIECE_SVGS[moverColor + p.toUpperCase()] || p;
+        btn.innerHTML = currentPieces[moverColor + p.toUpperCase()] || p;
         btn.addEventListener("click", () => {
           picker.remove();
           resolve(p);
@@ -1380,6 +1919,7 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
     const ranks = orientation === "white" ? [8,7,6,5,4,3,2,1] : [1,2,3,4,5,6,7,8];
     const destSquares = {};
     legalMoves.forEach((m) => { destSquares[m.to] = m; });
+    const currentPieces = PIECE_SETS[currentPieceSet] || PIECE_SETS["merida"];
 
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
@@ -1404,7 +1944,7 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
           const piece = boardState[sq];
           const pieceDiv = document.createElement("div");
           pieceDiv.className = "chess-piece";
-          pieceDiv.innerHTML = PIECE_SVGS[piece] || "";
+          pieceDiv.innerHTML = currentPieces[piece] || "";
           sqDiv.appendChild(pieceDiv);
         }
 

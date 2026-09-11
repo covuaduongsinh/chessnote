@@ -13,29 +13,72 @@
 // khi câu hỏi tự nhiên chứa 1 từ không khớp field nào ("tôi", "tại sao", "hay"...).
 // Thay bằng so khớp từ khoá kiểu OR đơn giản (không phân biệt dấu) trên một đoạn
 // văn bản gộp mỗi ván (metadata + tóm tắt AI của Giai đoạn C nếu đã có).
-import { editor, index, markdown, space, system } from "@silverbulletmd/silverbullet/syscalls";
-import type { ChessGameFields, ChessGameObject } from "../index.ts";
+import {
+  editor,
+  index,
+  markdown,
+  space,
+  system,
+} from "@silverbulletmd/silverbullet/syscalls";
 import { extractFrontMatter } from "../../index/frontmatter.ts";
-import { ANTI_HALLUCINATION_RULE } from "./coach.ts";
+import type { ChessGameFields, ChessGameObject } from "../index.ts";
 import { aiAsk } from "./bridge.ts";
+import { ANTI_HALLUCINATION_RULE } from "./coach.ts";
 
 const MAX_CONTEXT_GAMES = 15;
 
 function normalize(s: string): string {
-  return s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+  return s
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
 }
 
 // Hư từ tiếng Việt phổ biến (đã bỏ dấu) — loại khỏi từ khoá để không so khớp
 // những từ xuất hiện ở gần như mọi câu hỏi, vô nghĩa để lọc ván liên quan.
 const VI_STOPWORDS = new Set([
-  "la", "va", "co", "khong", "cua", "the", "toi", "ban", "hay", "voi", "trong",
-  "nhung", "mot", "nao", "gi", "vi", "sao", "nhu", "de", "cho", "o", "tren",
-  "duoc", "ve", "da", "se", "lam", "nhieu", "it", "nay", "do", "kia", "ay", "tai",
-  "tim", "cac",
+  "la",
+  "va",
+  "co",
+  "khong",
+  "cua",
+  "the",
+  "toi",
+  "ban",
+  "hay",
+  "voi",
+  "trong",
+  "nhung",
+  "mot",
+  "nao",
+  "gi",
+  "vi",
+  "sao",
+  "nhu",
+  "de",
+  "cho",
+  "o",
+  "tren",
+  "duoc",
+  "ve",
+  "da",
+  "se",
+  "lam",
+  "nhieu",
+  "it",
+  "nay",
+  "do",
+  "kia",
+  "ay",
+  "tai",
+  "tim",
+  "cac",
 ]);
 
 export function extractKeywords(question: string): string[] {
-  const tokens = normalize(question).split(/[^a-z0-9]+/).filter((t) => t.length >= 2);
+  const tokens = normalize(question)
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2);
   return [...new Set(tokens.filter((t) => !VI_STOPWORDS.has(t)))];
 }
 
@@ -50,7 +93,9 @@ export interface QaContextEntry {
 }
 
 function entryBlob(e: QaContextEntry): string {
-  return normalize([e.white, e.black, e.result, e.eco, e.event, e.summary].join(" "));
+  return normalize(
+    [e.white, e.black, e.result, e.eco, e.event, e.summary].join(" "),
+  );
 }
 
 export function scoreEntries(
@@ -58,7 +103,10 @@ export function scoreEntries(
   keywords: string[],
 ): (QaContextEntry & { score: number })[] {
   return entries
-    .map((e) => ({ ...e, score: keywords.filter((k) => entryBlob(e).includes(k)).length }))
+    .map((e) => ({
+      ...e,
+      score: keywords.filter((k) => entryBlob(e).includes(k)).length,
+    }))
     .filter((e) => e.score > 0)
     .sort((a, b) => b.score - a.score);
 }
@@ -75,7 +123,10 @@ export function citationLine(e: QaContextEntry): string {
   return parts.join(" — ");
 }
 
-export function buildQaPrompt(question: string, matches: QaContextEntry[]): string {
+export function buildQaPrompt(
+  question: string,
+  matches: QaContextEntry[],
+): string {
   const sourceLines = matches.length
     ? matches.map((m, i) => `${i + 1}. ${citationLine(m)}`)
     : ["(không tìm thấy ván nào khớp từ khoá trong câu hỏi)"];
@@ -93,7 +144,8 @@ export function buildQaPrompt(question: string, matches: QaContextEntry[]): stri
       "Nếu danh sách trống hoặc không đủ thông tin để trả lời, nói rõ là không tìm thấy dữ liệu " +
       "phù hợp thay vì cố trả lời. Không chào hỏi, đi thẳng vào câu trả lời.",
     "",
-    ANTI_HALLUCINATION_RULE + " Không bịa thêm ván, tên trang, hay chi tiết nào ngoài danh sách trên.",
+    ANTI_HALLUCINATION_RULE +
+      " Không bịa thêm ván, tên trang, hay chi tiết nào ngoài danh sách trên.",
   ];
   return lines.join("\n");
 }
@@ -111,7 +163,9 @@ async function readSummary(page: string): Promise<string> {
   }
 }
 
-export async function buildContextEntry(game: ChessGameObject): Promise<QaContextEntry> {
+export async function buildContextEntry(
+  game: ChessGameObject,
+): Promise<QaContextEntry> {
   return {
     page: game.page,
     white: game.white,
@@ -133,7 +187,9 @@ export async function commandAskAi() {
     return;
   }
 
-  const question = await editor.prompt("Hỏi AI về các ván cờ trong không gian ghi chú:");
+  const question = await editor.prompt(
+    "Hỏi AI về các ván cờ trong không gian ghi chú:",
+  );
   if (!question) return;
 
   const games = await index.queryLuaObjects<ChessGameFields>("chess-game", {});
@@ -145,7 +201,9 @@ export async function commandAskAi() {
     return;
   }
 
-  const entries = await Promise.all(games.map((g) => buildContextEntry(g as ChessGameObject)));
+  const entries = await Promise.all(
+    games.map((g) => buildContextEntry(g as ChessGameObject)),
+  );
   const keywords = extractKeywords(question);
   const matches = scoreEntries(entries, keywords).slice(0, MAX_CONTEXT_GAMES);
 
@@ -176,6 +234,9 @@ ${sourcesMd}
   await editor.navigate(reportName);
 
   if (!ai.ok) {
-    await editor.flashNotification(`AI không trả lời được: ${ai.error || "lỗi không rõ"}`, "warning");
+    await editor.flashNotification(
+      `AI không trả lời được: ${ai.error || "lỗi không rõ"}`,
+      "warning",
+    );
   }
 }

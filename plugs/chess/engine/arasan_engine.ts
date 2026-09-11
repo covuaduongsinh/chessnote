@@ -34,8 +34,8 @@
 // so there is no persistent process to manage. The engine's own binary and
 // network bytes are cached across calls (space.readFile is only paid once).
 
-import { Chess } from "chess.js";
 import { space } from "@silverbulletmd/silverbullet/syscalls";
+import { Chess } from "chess.js";
 // @ts-expect-error -- Emscripten-generated JS glue (build/build_client.ts
 // doesn't compile it, no .d.ts shipped); typed as `any` at the call sites below.
 import ArasanModule from "./wasm/arasan.mjs";
@@ -67,7 +67,10 @@ export interface EngineResult {
 
 let cachedBytes: { wasm: Uint8Array; nnue: Uint8Array } | null = null;
 
-async function getEngineBytes(): Promise<{ wasm: Uint8Array; nnue: Uint8Array }> {
+async function getEngineBytes(): Promise<{
+  wasm: Uint8Array;
+  nnue: Uint8Array;
+}> {
   if (cachedBytes) return cachedBytes;
   const [hasWasm, hasNnue] = await Promise.all([
     space.fileExists(WASM_PATH),
@@ -120,7 +123,10 @@ function parseUciOutput(lines: string[]): EngineResult {
  * EngineNotInstalledError if the "Chess Engine" Library hasn't been
  * installed in this Space.
  */
-export async function evalPosition(fen: string, depth = 12): Promise<EngineResult> {
+export async function evalPosition(
+  fen: string,
+  depth = 12,
+): Promise<EngineResult> {
   // A position with no legal moves (checkmate/stalemate) has nothing to
   // search — asking Arasan anyway produces UCI output parseUciOutput() can't
   // turn into a meaningful score, which used to surface as a misleading
@@ -158,15 +164,17 @@ export async function evalPosition(fen: string, depth = 12): Promise<EngineResul
     // deno-lint-ignore no-explicit-any
     instantiateWasm(imports: WebAssembly.Imports, successCallback: any) {
       (
-        WebAssembly.instantiate(wasm, imports) as unknown as Promise<
-          WebAssembly.WebAssemblyInstantiatedSource
-        >
+        WebAssembly.instantiate(
+          wasm,
+          imports,
+        ) as unknown as Promise<WebAssembly.WebAssemblyInstantiatedSource>
       ).then((output) => successCallback(output.instance, output.module));
       return {};
     },
     print: (text: string) => outputLines.push(text),
     printErr: () => {},
-    stdin: () => (stdinPos < stdinQueue.length ? stdinQueue.charCodeAt(stdinPos++) : null),
+    stdin: () =>
+      stdinPos < stdinQueue.length ? stdinQueue.charCodeAt(stdinPos++) : null,
     noInitialRun: true,
   });
 

@@ -1,11 +1,11 @@
-import { Chess } from "chess.js";
 import {
   collectNodesOfType,
   findNodeOfType,
-  renderToText,
   type ParseTree,
+  renderToText,
 } from "@silverbulletmd/silverbullet/lib/tree";
 import { markdown } from "@silverbulletmd/silverbullet/syscalls";
+import { Chess } from "chess.js";
 import { CHESS_CSS, renderStaticBoardHtml } from "./board_renderer.ts";
 import { buildMoveList, type MoveListEntry } from "./engine/game_reviewer.ts";
 import {
@@ -165,15 +165,31 @@ function renderFenBlockForPdf(bodyText: string): BoardRender {
   const fen = lines[0]?.trim() ?? "";
   let title = "";
   let orientation: "white" | "black" = "white";
+  let pieceSet = "merida";
+  let boardTheme = "textbook";
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (line.startsWith("| title:")) {
       title = line.replace("| title:", "").trim();
     } else if (line.startsWith("| orientation:")) {
       orientation = line.includes("black") ? "black" : "white";
+    } else if (line.startsWith("| pieceSet:") || line.startsWith("| pieces:")) {
+      pieceSet = line.replace(/\| (pieceSet|pieces):/, "").trim();
+    } else if (
+      line.startsWith("| boardTheme:") ||
+      line.startsWith("| theme:") ||
+      line.startsWith("| board:")
+    ) {
+      boardTheme = line.replace(/\| (boardTheme|theme|board):/, "").trim();
     }
   }
-  const html = renderStaticBoardHtml(fen, { title, orientation, showFen: false });
+  const html = renderStaticBoardHtml(fen, {
+    title,
+    orientation,
+    showFen: false,
+    pieceSet,
+    boardTheme,
+  });
   return {
     html,
     meta: {
@@ -191,20 +207,39 @@ function renderPuzzleBlockForPdf(bodyText: string): BoardRender {
   const lines = bodyText.trim().split("\n");
   let fen = "";
   let hint = "";
+  let pieceSet = "merida";
+  let boardTheme = "textbook";
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed.startsWith("fen:")) {
       fen = trimmed.replace("fen:", "").trim();
     } else if (trimmed.startsWith("hint:")) {
       hint = trimmed.replace("hint:", "").trim();
+    } else if (
+      trimmed.startsWith("pieceSet:") ||
+      trimmed.startsWith("pieces:")
+    ) {
+      pieceSet = trimmed.replace(/(pieceSet|pieces):/, "").trim();
+    } else if (
+      trimmed.startsWith("boardTheme:") ||
+      trimmed.startsWith("theme:") ||
+      trimmed.startsWith("board:")
+    ) {
+      boardTheme = trimmed.replace(/(boardTheme|theme|board):/, "").trim();
     }
   }
   const title = "Bài tập cờ";
-  const board = renderStaticBoardHtml(fen, { title, showFen: false });
+  const board = renderStaticBoardHtml(fen, {
+    title,
+    showFen: false,
+    pieceSet,
+    boardTheme,
+  });
   const isError = !board.includes("chessnote-static-board");
-  const hintHtml = !isError && hint
-    ? `<div class="puzzle-hint-box">Gợi ý: ${escapeHtml(hint)}</div>`
-    : "";
+  const hintHtml =
+    !isError && hint
+      ? `<div class="puzzle-hint-box">Gợi ý: ${escapeHtml(hint)}</div>`
+      : "";
   return {
     html: `${board}${hintHtml}`,
     meta: {
@@ -259,8 +294,9 @@ function resolveDisplayMove(
 
   let entry = moves.find((m) => m.moveNum === moveNum && m.isWhite === isWhite);
   if (!entry) {
-    const candidates = moves.filter((m) =>
-      m.moveNum < moveNum || (m.moveNum === moveNum && m.isWhite && !isWhite)
+    const candidates = moves.filter(
+      (m) =>
+        m.moveNum < moveNum || (m.moveNum === moveNum && m.isWhite && !isWhite),
     );
     entry = candidates[candidates.length - 1];
   }
@@ -312,13 +348,23 @@ function renderPgnBlockForPdf(bodyText: string): BoardRender {
     // move list here just means no moves to list/display, not a second error.
   }
 
-  const displayMove = resolveDisplayMove(moves, header["DisplayMove"] ?? undefined);
+  const displayMove = resolveDisplayMove(
+    moves,
+    header["DisplayMove"] ?? undefined,
+  );
   const titleSuffix = displayMove ? ` — ${displayMove.label}` : "";
   const title = `${white} vs ${black} (${result})${titleSuffix}`;
-  const board = renderStaticBoardHtml(displayMove?.entry.fenAfter ?? START_POSITION_FEN, {
-    title,
-    showFen: false,
-  });
+  const pieceSet = header["PieceSet"] || header["Pieces"] || "merida";
+  const boardTheme = header["BoardTheme"] || header["Theme"] || "textbook";
+  const board = renderStaticBoardHtml(
+    displayMove?.entry.fenAfter ?? START_POSITION_FEN,
+    {
+      title,
+      showFen: false,
+      pieceSet,
+      boardTheme,
+    },
+  );
 
   let movetext = "";
   for (const move of moves) {
@@ -350,8 +396,8 @@ function renderFenceForPdf(node: ParseTree, lang: string): BoardRender {
   return lang === "fen"
     ? renderFenBlockForPdf(body)
     : lang === "pgn"
-    ? renderPgnBlockForPdf(body)
-    : renderPuzzleBlockForPdf(body);
+      ? renderPgnBlockForPdf(body)
+      : renderPuzzleBlockForPdf(body);
 }
 
 type PdfBlock =
@@ -417,14 +463,18 @@ export async function renderPageForPdf(
       continue;
     }
 
-    const nestedBoardNodes = collectNodesOfType(node, "FencedCode").filter((n) =>
-      boardByNode.has(n)
+    const nestedBoardNodes = collectNodesOfType(node, "FencedCode").filter(
+      (n) => boardByNode.has(n),
     );
     if (nestedBoardNodes.length === 0) {
       blocks.push({
         kind: "text",
         markdownSrc: text.slice(node.from, node.to),
-        estHeight: estimateTextHeightPx(node.type, renderToText(node), colWidthPx),
+        estHeight: estimateTextHeightPx(
+          node.type,
+          renderToText(node),
+          colWidthPx,
+        ),
       });
       continue;
     }
@@ -437,16 +487,29 @@ export async function renderPageForPdf(
     // never-split-across-a-column placement (only the CSS break-inside
     // fallback), since column-fill is per top-level node.
     const replacements = nestedBoardNodes
-      .map((n) => ({ from: n.from!, to: n.to!, html: boardByNode.get(n)!.html }))
+      .map((n) => ({
+        from: n.from!,
+        to: n.to!,
+        html: boardByNode.get(n)!.html,
+      }))
       .sort((a, b) => b.from - a.from);
     let spliced = text.slice(node.from, node.to);
     for (const r of replacements) {
-      spliced = spliced.slice(0, r.from - node.from) + r.html +
+      spliced =
+        spliced.slice(0, r.from - node.from) +
+        r.html +
         spliced.slice(r.to - node.from);
     }
-    let estHeight = estimateTextHeightPx(node.type, renderToText(node), colWidthPx);
+    let estHeight = estimateTextHeightPx(
+      node.type,
+      renderToText(node),
+      colWidthPx,
+    );
     for (const n of nestedBoardNodes) {
-      estHeight += estimateBoardHeightPx(clampedBoardSize, boardByNode.get(n)!.meta);
+      estHeight += estimateBoardHeightPx(
+        clampedBoardSize,
+        boardByNode.get(n)!.meta,
+      );
     }
     blocks.push({ kind: "text", markdownSrc: spliced, estHeight });
   }
@@ -470,7 +533,12 @@ export async function renderPageForPdf(
     let j = i + 1;
     while (j < placed.length) {
       const next = placed[j];
-      if (next.kind !== "text" || next.page !== cur.page || next.col !== cur.col) break;
+      if (
+        next.kind !== "text" ||
+        next.page !== cur.page ||
+        next.col !== cur.col
+      )
+        break;
       srcs.push(next.markdownSrc);
       j++;
     }

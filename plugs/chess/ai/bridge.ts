@@ -13,7 +13,10 @@ import { config, editor } from "@silverbulletmd/silverbullet/syscalls";
 const DEFAULT_SIDECAR_URL = "http://127.0.0.1:3457";
 
 async function sidecarConfig(): Promise<{ url: string; token: string }> {
-  const url = await config.get<string>("chess.ai.sidecarUrl", DEFAULT_SIDECAR_URL);
+  const url = await config.get<string>(
+    "chess.ai.sidecarUrl",
+    DEFAULT_SIDECAR_URL,
+  );
   const token = await config.get<string>("chess.ai.sidecarToken", "");
   return { url, token };
 }
@@ -23,7 +26,9 @@ async function sidecarFetch(
   init: { method?: string; body?: unknown } = {},
 ): Promise<any> {
   const { url, token } = await sidecarConfig();
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+  };
   if (token) headers.authorization = `Bearer ${token}`;
   try {
     const res = await fetch(`${url}${path}`, {
@@ -58,7 +63,8 @@ export async function initAiConfig() {
     ui: { category: "AI", label: "Chế độ AI", priority: 1 },
   });
   await config.define("chess.ai.sidecarUrl", {
-    description: "Địa chỉ ai-sidecar (tiến trình Node độc lập lo đăng nhập + gọi CLI claude).",
+    description:
+      "Địa chỉ ai-sidecar (tiến trình Node độc lập lo đăng nhập + gọi CLI claude).",
     type: "string",
     default: DEFAULT_SIDECAR_URL,
     ui: { category: "AI", label: "Địa chỉ ai-sidecar", priority: 2 },
@@ -105,7 +111,10 @@ export async function aiAuthCancel() {
 export async function aiAsk(prompt: string) {
   const mode = await config.get<string>("chess.ai.mode", "subscription");
   const model = await config.get<string>("chess.ai.model", "claude-haiku-4-5");
-  return sidecarFetch("/ai/generate", { method: "POST", body: { prompt, mode, model } });
+  return sidecarFetch("/ai/generate", {
+    method: "POST",
+    body: { prompt, mode, model },
+  });
 }
 
 const SIDECAR_NOT_RUNNING_HINT =
@@ -117,7 +126,10 @@ const SIDECAR_NOT_RUNNING_HINT =
 export async function commandAiLogin() {
   const status = await aiStatus();
   if (!status.ok) {
-    await editor.flashNotification(`${status.error || "Lỗi không rõ"}. ${SIDECAR_NOT_RUNNING_HINT}`, "error");
+    await editor.flashNotification(
+      `${status.error || "Lỗi không rõ"}. ${SIDECAR_NOT_RUNNING_HINT}`,
+      "error",
+    );
     return;
   }
   if (status.connected) {
@@ -130,7 +142,10 @@ export async function commandAiLogin() {
 
   const start = await aiAuthStart();
   if (!start.ok || !start.url) {
-    await editor.flashNotification(`Không bắt đầu được đăng nhập: ${start.error || "không rõ lỗi"}`, "error");
+    await editor.flashNotification(
+      `Không bắt đầu được đăng nhập: ${start.error || "không rõ lỗi"}`,
+      "error",
+    );
     return;
   }
 
@@ -148,7 +163,10 @@ export async function commandAiLogin() {
   if (result.ok) {
     await editor.flashNotification("Đăng nhập AI thành công.", "info");
   } else {
-    await editor.flashNotification(`Đăng nhập thất bại: ${result.error || "không rõ lỗi"}`, "error");
+    await editor.flashNotification(
+      `Đăng nhập thất bại: ${result.error || "không rõ lỗi"}`,
+      "error",
+    );
   }
 }
 
@@ -160,7 +178,9 @@ export async function commandAiLogout() {
   if (!confirmed) return;
   const result = await aiAuthLogout();
   await editor.flashNotification(
-    result.ok ? "Đã đăng xuất AI." : `Đăng xuất thất bại: ${result.detail || result.error || "không rõ lỗi"}`,
+    result.ok
+      ? "Đã đăng xuất AI."
+      : `Đăng xuất thất bại: ${result.detail || result.error || "không rõ lỗi"}`,
     result.ok ? "info" : "error",
   );
 }
@@ -169,17 +189,29 @@ export async function commandAiLogout() {
 export async function commandAiStatus() {
   const status = await aiStatus();
   if (!status.ok) {
-    await editor.flashNotification(`${status.error || "Lỗi không rõ"}. ${SIDECAR_NOT_RUNNING_HINT}`, "error");
+    await editor.flashNotification(
+      `${status.error || "Lỗi không rõ"}. ${SIDECAR_NOT_RUNNING_HINT}`,
+      "error",
+    );
     return;
   }
   if (status.unknown) {
-    await editor.flashNotification("Không xác định được trạng thái AI (sidecar không phản hồi kịp).", "warning");
+    await editor.flashNotification(
+      "Không xác định được trạng thái AI (sidecar không phản hồi kịp).",
+      "warning",
+    );
     return;
   }
   if (!status.connected) {
-    await editor.flashNotification('Chưa đăng nhập AI. Chạy lệnh "Chess: Đăng nhập AI" để bắt đầu.', "info");
+    await editor.flashNotification(
+      'Chưa đăng nhập AI. Chạy lệnh "Chess: Đăng nhập AI" để bắt đầu.',
+      "info",
+    );
     return;
   }
   const staleNote = status.stale ? " (dữ liệu cũ, chưa hỏi lại được CLI)" : "";
-  await editor.flashNotification(`Đã đăng nhập AI: ${status.account || "không rõ tài khoản"}${staleNote}`, "info");
+  await editor.flashNotification(
+    `Đã đăng nhập AI: ${status.account || "không rõ tài khoản"}${staleNote}`,
+    "info",
+  );
 }

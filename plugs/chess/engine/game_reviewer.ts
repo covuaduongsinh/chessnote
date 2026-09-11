@@ -1,6 +1,6 @@
 import { Chess } from "chess.js";
+import { type EngineResult, evalPosition } from "./arasan_engine.ts";
 import { centipawnsToWinChance } from "./uci_protocol.ts";
-import { evalPosition, type EngineResult } from "./arasan_engine.ts";
 
 export type MoveClassification =
   | "brilliant" // !!
@@ -80,9 +80,12 @@ function sideToMoveIsWhite(fen: string): boolean {
 // the sign of who is winning.
 function toWhiteCp(fen: string, result: EngineResult): number {
   const whiteToMove = sideToMoveIsWhite(fen);
-  const stmCp = result.mateIn !== null && result.mateIn !== undefined
-    ? (result.mateIn > 0 ? 10000 : -10000)
-    : (result.scoreCp ?? 0);
+  const stmCp =
+    result.mateIn !== null && result.mateIn !== undefined
+      ? result.mateIn > 0
+        ? 10000
+        : -10000
+      : (result.scoreCp ?? 0);
   return whiteToMove ? stmCp : -stmCp;
 }
 
@@ -118,7 +121,10 @@ function uciToSan(fen: string, uciMove: string | null): string | undefined {
  * evalPosition() throws (including EngineNotInstalledError) instead of
  * silently falling back to a fake/heuristic result.
  */
-export async function reviewGame(pgn: string, depth = 12): Promise<GameReviewReport> {
+export async function reviewGame(
+  pgn: string,
+  depth = 12,
+): Promise<GameReviewReport> {
   const moveList = buildMoveList(pgn);
 
   const emptyStats = (): Record<MoveClassification, number> => ({
@@ -136,7 +142,14 @@ export async function reviewGame(pgn: string, depth = 12): Promise<GameReviewRep
   const blackStats = emptyStats();
 
   if (moveList.length === 0) {
-    return { whiteAccuracy: 100, blackAccuracy: 100, whiteStats, blackStats, moves: [], advantageGraph: [] };
+    return {
+      whiteAccuracy: 100,
+      blackAccuracy: 100,
+      whiteStats,
+      blackStats,
+      moves: [],
+      advantageGraph: [],
+    };
   }
 
   // One evalPosition() per distinct position: start position + after every
@@ -190,8 +203,12 @@ export async function reviewGame(pgn: string, depth = 12): Promise<GameReviewRep
       ? Math.max(0, scoreBeforeWhite - scoreAfterWhite)
       : Math.max(0, scoreAfterWhite - scoreBeforeWhite);
 
-    const winBefore = centipawnsToWinChance(isWhite ? scoreBeforeWhite : -scoreBeforeWhite);
-    const winAfter = centipawnsToWinChance(isWhite ? scoreAfterWhite : -scoreAfterWhite);
+    const winBefore = centipawnsToWinChance(
+      isWhite ? scoreBeforeWhite : -scoreBeforeWhite,
+    );
+    const winAfter = centipawnsToWinChance(
+      isWhite ? scoreAfterWhite : -scoreAfterWhite,
+    );
     const winLoss = Math.max(0, winBefore - winAfter);
 
     if (isWhite) {
@@ -237,12 +254,20 @@ export async function reviewGame(pgn: string, depth = 12): Promise<GameReviewRep
     });
   }
 
-  const whiteAccuracy = whiteMoveCount > 0
-    ? Math.max(40, Math.min(99.5, 100 - (totalWhiteWinLoss / whiteMoveCount) * 2.2))
-    : 100;
-  const blackAccuracy = blackMoveCount > 0
-    ? Math.max(40, Math.min(99.5, 100 - (totalBlackWinLoss / blackMoveCount) * 2.2))
-    : 100;
+  const whiteAccuracy =
+    whiteMoveCount > 0
+      ? Math.max(
+          40,
+          Math.min(99.5, 100 - (totalWhiteWinLoss / whiteMoveCount) * 2.2),
+        )
+      : 100;
+  const blackAccuracy =
+    blackMoveCount > 0
+      ? Math.max(
+          40,
+          Math.min(99.5, 100 - (totalBlackWinLoss / blackMoveCount) * 2.2),
+        )
+      : 100;
 
   return {
     whiteAccuracy: parseFloat(whiteAccuracy.toFixed(1)),

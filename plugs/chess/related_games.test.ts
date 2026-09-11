@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
-import { findRelatedGames } from "./related_games.ts";
 import type { ChessGameObject } from "./index.ts";
+import { findRelatedGames } from "./related_games.ts";
 
 function game(overrides: Partial<ChessGameObject> = {}): ChessGameObject {
   return {
@@ -19,7 +19,12 @@ function game(overrides: Partial<ChessGameObject> = {}): ChessGameObject {
 }
 
 test("scores same-ECO games higher and explains why", () => {
-  const current = { page: "Current", white: "Nobody", black: "Nobody2", eco: "C50" };
+  const current = {
+    page: "Current",
+    white: "Nobody",
+    black: "Nobody2",
+    eco: "C50",
+  };
   const candidates = [
     game({ page: "SameEco", eco: "C50", white: "X", black: "Y" }),
     game({ page: "DifferentEco", eco: "B90", white: "X", black: "Y" }),
@@ -43,13 +48,22 @@ test("matches shared opponent regardless of which side they played", () => {
 
 test("ignores placeholder names (White/Black/empty) as a shared-player signal", () => {
   const current = { page: "Current", white: "White", black: "Black", eco: "" };
-  const candidates = [game({ page: "AlsoPlaceholder", white: "White", black: "Black" })];
+  const candidates = [
+    game({ page: "AlsoPlaceholder", white: "White", black: "Black" }),
+  ];
   expect(findRelatedGames(current, candidates)).toEqual([]);
 });
 
 test("excludes games on the same page (assumed to be the game being viewed)", () => {
-  const current = { page: "SamePage", white: "Alice", black: "Bob", eco: "C50" };
-  const candidates = [game({ page: "SamePage", eco: "C50", white: "Alice", black: "Bob" })];
+  const current = {
+    page: "SamePage",
+    white: "Alice",
+    black: "Bob",
+    eco: "C50",
+  };
+  const candidates = [
+    game({ page: "SamePage", eco: "C50", white: "Alice", black: "Bob" }),
+  ];
   expect(findRelatedGames(current, candidates)).toEqual([]);
 });
 
@@ -61,7 +75,11 @@ test("combines ECO + shared-opponent scores and sorts descending", () => {
     game({ page: "OpponentOnly", eco: "", white: "Bob", black: "Z" }), // score 2
   ];
   const results = findRelatedGames(current, candidates);
-  expect(results.map((r) => r.page)).toEqual(["EcoAndOpponent", "EcoOnly", "OpponentOnly"]);
+  expect(results.map((r) => r.page)).toEqual([
+    "EcoAndOpponent",
+    "EcoOnly",
+    "OpponentOnly",
+  ]);
   expect(results[0].score).toBe(5);
 });
 
@@ -75,6 +93,8 @@ test("caps results at the given limit", () => {
 
 test("returns an empty list when nothing matches", () => {
   const current = { page: "Current", white: "Alice", black: "Bob", eco: "C50" };
-  const candidates = [game({ page: "Other", eco: "B90", white: "X", black: "Y" })];
+  const candidates = [
+    game({ page: "Other", eco: "B90", white: "X", black: "Y" }),
+  ];
   expect(findRelatedGames(current, candidates)).toEqual([]);
 });

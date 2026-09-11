@@ -1,11 +1,20 @@
 import { describe, expect, test, vi } from "vitest";
-import type { GameReviewReport, MoveClassification, ReviewedMove } from "../engine/game_reviewer.ts";
+import type {
+  GameReviewReport,
+  MoveClassification,
+  ReviewedMove,
+} from "../engine/game_reviewer.ts";
 
 type AiAskResult = { ok: true; text: string } | { ok: false; error: string };
 const aiAskMock = vi.fn(
-  async (_prompt: string): Promise<AiAskResult> => ({ ok: true, text: "mock reply" }),
+  async (_prompt: string): Promise<AiAskResult> => ({
+    ok: true,
+    text: "mock reply",
+  }),
 );
-vi.mock("./bridge.ts", () => ({ aiAsk: (prompt: string) => aiAskMock(prompt) }));
+vi.mock("./bridge.ts", () => ({
+  aiAsk: (prompt: string) => aiAskMock(prompt),
+}));
 
 const {
   buildExplainMovePrompt,
@@ -68,7 +77,13 @@ describe("buildExplainMovePrompt", () => {
 
   test("marks black moves with '..' and omits cpl phrase when cpl is 0", () => {
     const prompt = buildExplainMovePrompt(
-      move({ isWhite: false, moveNum: 8, classification: "best", cpl: 0, bestMoveSan: undefined }),
+      move({
+        isWhite: false,
+        moveNum: 8,
+        classification: "best",
+        cpl: 0,
+        bestMoveSan: undefined,
+      }),
     );
     expect(prompt).toContain("8... Nxe5");
     expect(prompt).not.toContain("mất 0 centipawn");
@@ -85,10 +100,16 @@ describe("buildExplainMovePrompt", () => {
 describe("buildAnnotateGamePrompt", () => {
   test("caps the turning-point list at 10 even for a long game full of blunders", () => {
     const manyBlunders: ReviewedMove[] = Array.from({ length: 40 }, (_, i) =>
-      move({ moveNum: i + 1, isWhite: i % 2 === 0, classification: "blunder", cpl: 100 + i, san: `m${i}` }),
+      move({
+        moveNum: i + 1,
+        isWhite: i % 2 === 0,
+        classification: "blunder",
+        cpl: 100 + i,
+        san: `m${i}`,
+      }),
     );
     const prompt = buildAnnotateGamePrompt(report({ moves: manyBlunders }));
-    const bulletCount = (prompt.match(/^  - /gm) || []).length;
+    const bulletCount = (prompt.match(/^ {2}- /gm) || []).length;
     expect(bulletCount).toBe(10);
   });
 
@@ -107,7 +128,9 @@ describe("buildAnnotateGamePrompt", () => {
   });
 
   test("falls back to a placeholder line when there are no turning points", () => {
-    const prompt = buildAnnotateGamePrompt(report({ moves: [move({ classification: "good", cpl: 5 })] }));
+    const prompt = buildAnnotateGamePrompt(
+      report({ moves: [move({ classification: "good", cpl: 5 })] }),
+    );
     expect(prompt).toContain("không có bước ngoặt đáng chú ý");
   });
 
@@ -129,14 +152,19 @@ describe("buildAnnotateGamePrompt", () => {
   test("always carries the anti-hallucination constraint (regression guard)", () => {
     const prompt = buildAnnotateGamePrompt(report());
     expect(prompt).toMatch(/KHÔNG suy diễn/);
-    expect(prompt).toMatch(/không nhắc tới bất kỳ nước đi nào ngoài danh sách/i);
+    expect(prompt).toMatch(
+      /không nhắc tới bất kỳ nước đi nào ngoài danh sách/i,
+    );
   });
 });
 
 describe("explainMove / annotateGame — thin pass-through to aiAsk", () => {
   test("explainMove calls aiAsk exactly once with the built prompt and returns its result verbatim", async () => {
     aiAskMock.mockClear();
-    aiAskMock.mockResolvedValueOnce({ ok: true, text: "Nước này để mất một quân." });
+    aiAskMock.mockResolvedValueOnce({
+      ok: true,
+      text: "Nước này để mất một quân.",
+    });
     const result = await explainMove(move());
     expect(aiAskMock).toHaveBeenCalledTimes(1);
     expect(aiAskMock.mock.calls[0][0]).toBe(buildExplainMovePrompt(move()));

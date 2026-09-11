@@ -2,16 +2,17 @@ import { describe, expect, test, vi } from "vitest";
 
 type AiAskResult = { ok: true; text: string } | { ok: false; error: string };
 const aiAskMock = vi.fn(
-  async (_prompt: string): Promise<AiAskResult> => ({ ok: true, text: "mock reply" }),
+  async (_prompt: string): Promise<AiAskResult> => ({
+    ok: true,
+    text: "mock reply",
+  }),
 );
-vi.mock("./bridge.ts", () => ({ aiAsk: (prompt: string) => aiAskMock(prompt) }));
+vi.mock("./bridge.ts", () => ({
+  aiAsk: (prompt: string) => aiAskMock(prompt),
+}));
 
-const {
-  extractKeywords,
-  scoreEntries,
-  citationLine,
-  buildQaPrompt,
-} = await import("./qa.ts");
+const { extractKeywords, scoreEntries, citationLine, buildQaPrompt } =
+  await import("./qa.ts");
 type QaContextEntry = Parameters<typeof citationLine>[0];
 
 function entry(overrides: Partial<QaContextEntry> = {}): QaContextEntry {
@@ -57,7 +58,9 @@ describe("scoreEntries", () => {
   });
 
   test("excludes entries that match none of the keywords", () => {
-    const entries = [entry({ page: "NoMatch", white: "X", black: "Y", eco: "", event: "" })];
+    const entries = [
+      entry({ page: "NoMatch", white: "X", black: "Y", eco: "", event: "" }),
+    ];
     expect(scoreEntries(entries, ["sicilian"])).toEqual([]);
   });
 
@@ -72,7 +75,13 @@ describe("scoreEntries", () => {
 
   test("finds matches in the Giai đoạn C summary field too", () => {
     const entries = [
-      entry({ page: "Summarized", white: "X", black: "Y", eco: "", summary: "Đen hy sinh hậu sớm" }),
+      entry({
+        page: "Summarized",
+        white: "X",
+        black: "Y",
+        eco: "",
+        summary: "Đen hy sinh hậu sớm",
+      }),
       entry({ page: "NoSummary", white: "A", black: "B", eco: "" }),
     ];
     const scored = scoreEntries(entries, extractKeywords("hy sinh hậu"));
@@ -103,7 +112,7 @@ describe("citationLine", () => {
 describe("buildQaPrompt", () => {
   test("includes the question, numbered sources, and the anti-hallucination rule", () => {
     const prompt = buildQaPrompt("Tôi hay thua kiểu gì?", [entry()]);
-    expect(prompt).toContain('Tôi hay thua kiểu gì?');
+    expect(prompt).toContain("Tôi hay thua kiểu gì?");
     expect(prompt).toContain("1. [[Game1]]");
     expect(prompt).toMatch(/KHÔNG suy diễn/);
     expect(prompt).toContain("Không bịa thêm ván, tên trang");
@@ -115,7 +124,9 @@ describe("buildQaPrompt", () => {
   });
 
   test("never invents player names not present in the given entries", () => {
-    const prompt = buildQaPrompt("Ai chơi hay nhất?", [entry({ white: "OnlyThisName", black: "AndThis" })]);
+    const prompt = buildQaPrompt("Ai chơi hay nhất?", [
+      entry({ white: "OnlyThisName", black: "AndThis" }),
+    ]);
     // Sanity: only the names we actually passed in appear, nothing fabricated.
     expect(prompt).toContain("OnlyThisName");
     expect(prompt).toContain("AndThis");

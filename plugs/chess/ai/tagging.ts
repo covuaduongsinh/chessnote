@@ -71,14 +71,16 @@ export function parseTagSuggestion(aiText: string): TagSuggestion | null {
 export async function suggestTags(
   input: TagSuggestionInput,
 ): Promise<
-  | { ok: true; tags: string[]; summary: string }
-  | { ok: false; error: string }
+  { ok: true; tags: string[]; summary: string } | { ok: false; error: string }
 > {
   const result = await aiAsk(buildTagSuggestionPrompt(input));
   if (!result.ok) return result;
   const parsed = parseTagSuggestion(result.text);
   if (!parsed) {
-    return { ok: false, error: "AI trả lời sai định dạng, không tự áp dụng được." };
+    return {
+      ok: false,
+      error: "AI trả lời sai định dạng, không tự áp dụng được.",
+    };
   }
   return { ok: true, ...parsed };
 }

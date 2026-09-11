@@ -33,8 +33,12 @@ describe("renderStaticBoardHtml", () => {
   });
 
   test("black orientation renders a different square order than white", () => {
-    const white = renderStaticBoardHtml(KINGS_ONLY_FEN, { orientation: "white" });
-    const black = renderStaticBoardHtml(KINGS_ONLY_FEN, { orientation: "black" });
+    const white = renderStaticBoardHtml(KINGS_ONLY_FEN, {
+      orientation: "white",
+    });
+    const black = renderStaticBoardHtml(KINGS_ONLY_FEN, {
+      orientation: "black",
+    });
     expect(white).not.toBe(black);
     // Same coloring rule still holds under the flip: h8 (now bottom-left) is dark.
     const blackSquares = black.match(/<div class="chess-sq [a-z]+">/g) || [];
@@ -49,7 +53,9 @@ describe("renderStaticBoardHtml", () => {
   });
 
   test("includes the title when given", () => {
-    const html = renderStaticBoardHtml(START_FEN, { title: "Vị trí khai cuộc" });
+    const html = renderStaticBoardHtml(START_FEN, {
+      title: "Vị trí khai cuộc",
+    });
     expect(html).toContain("Vị trí khai cuộc");
   });
 
@@ -62,5 +68,16 @@ describe("renderStaticBoardHtml", () => {
     const html = renderStaticBoardHtml(START_FEN, { showFen: false });
     expect(html).not.toContain(START_FEN);
     expect(html).not.toContain("fen-footer");
+  });
+
+  test("renders custom pieceSet and boardTheme", () => {
+    const html = renderStaticBoardHtml(START_FEN, {
+      pieceSet: "leipzig",
+      boardTheme: "wood",
+    });
+    expect(html).toContain("chessnote-static-board");
+    expect(html).toContain("--sq-light: #f0d9b5;");
+    expect(html).toContain("--sq-dark: #b58863;");
+    expect(html).toContain("<svg");
   });
 });

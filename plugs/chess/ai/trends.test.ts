@@ -1,12 +1,21 @@
 import { describe, expect, test, vi } from "vitest";
-import type { GameReviewReport, MoveClassification, ReviewedMove } from "../engine/game_reviewer.ts";
+import type {
+  GameReviewReport,
+  MoveClassification,
+  ReviewedMove,
+} from "../engine/game_reviewer.ts";
 import type { ChessGameObject } from "../index.ts";
 
 type AiAskResult = { ok: true; text: string } | { ok: false; error: string };
 const aiAskMock = vi.fn(
-  async (_prompt: string): Promise<AiAskResult> => ({ ok: true, text: "mock reply" }),
+  async (_prompt: string): Promise<AiAskResult> => ({
+    ok: true,
+    text: "mock reply",
+  }),
 );
-vi.mock("./bridge.ts", () => ({ aiAsk: (prompt: string) => aiAskMock(prompt) }));
+vi.mock("./bridge.ts", () => ({
+  aiAsk: (prompt: string) => aiAskMock(prompt),
+}));
 
 const {
   classifyPhase,
@@ -92,9 +101,17 @@ describe("classifyPhase", () => {
 describe("toCachedReview", () => {
   test("reuses the chess-game object's ref/page and caps turning points via pickTurningPoints", () => {
     const manyBlunders: ReviewedMove[] = Array.from({ length: 20 }, (_, i) =>
-      move({ moveNum: i + 1, classification: "blunder", cpl: 100 + i, san: `m${i}` }),
+      move({
+        moveNum: i + 1,
+        classification: "blunder",
+        cpl: 100 + i,
+        san: `m${i}`,
+      }),
     );
-    const cached = toCachedReview(game({ ref: "Game1@43", page: "Game1" }), report({ moves: manyBlunders }));
+    const cached = toCachedReview(
+      game({ ref: "Game1@43", page: "Game1" }),
+      report({ moves: manyBlunders }),
+    );
     expect(cached.ref).toBe("Game1@43");
     expect(cached.tag).toBe("chess-game-review");
     expect(cached.page).toBe("Game1");
@@ -121,8 +138,20 @@ describe("aggregateTrends", () => {
       whiteStats: { ...zeroStats(), blunder: 2 },
       blackStats: { ...zeroStats(), mistake: 1 },
       turningPoints: [
-        { moveNum: 5, isWhite: true, san: "a", classification: "blunder", cpl: 200 },
-        { moveNum: 30, isWhite: false, san: "b", classification: "mistake", cpl: 100 },
+        {
+          moveNum: 5,
+          isWhite: true,
+          san: "a",
+          classification: "blunder",
+          cpl: 200,
+        },
+        {
+          moveNum: 30,
+          isWhite: false,
+          san: "b",
+          classification: "mistake",
+          cpl: 100,
+        },
       ],
     };
     const r2: ChessGameReviewObject = {
@@ -132,10 +161,22 @@ describe("aggregateTrends", () => {
       whiteStats: { ...zeroStats(), blunder: 1 },
       blackStats: { ...zeroStats() },
       turningPoints: [
-        { moveNum: 15, isWhite: true, san: "c", classification: "blunder", cpl: 150 },
+        {
+          moveNum: 15,
+          isWhite: true,
+          san: "c",
+          classification: "blunder",
+          cpl: 150,
+        },
       ],
     };
-    const stats = aggregateTrends([g1, g2], new Map([[g1.ref, r1], [g2.ref, r2]]));
+    const stats = aggregateTrends(
+      [g1, g2],
+      new Map([
+        [g1.ref, r1],
+        [g2.ref, r2],
+      ]),
+    );
 
     expect(stats.gameCount).toBe(2);
     expect(stats.avgWhiteAccuracy).toBe(85);
@@ -143,7 +184,11 @@ describe("aggregateTrends", () => {
     expect(stats.errorCounts.blunder).toBe(3);
     expect(stats.errorCounts.mistake).toBe(1);
     // moveNum 5 -> opening, 30 -> endgame, 15 -> middlegame
-    expect(stats.phaseErrorCounts).toEqual({ opening: 1, middlegame: 1, endgame: 1 });
+    expect(stats.phaseErrorCounts).toEqual({
+      opening: 1,
+      middlegame: 1,
+      endgame: 1,
+    });
     expect(stats.ecoErrorCounts).toEqual([
       { eco: "C50", count: 2 },
       { eco: "B90", count: 1 },
@@ -235,7 +280,10 @@ describe("buildTrendsPrompt", () => {
 describe("analyzeTrends — thin pass-through to aiAsk", () => {
   test("calls aiAsk exactly once with buildTrendsPrompt's output and returns its result verbatim", async () => {
     aiAskMock.mockClear();
-    aiAskMock.mockResolvedValueOnce({ ok: true, text: "Bạn hay blunder ở tàn cuộc." });
+    aiAskMock.mockResolvedValueOnce({
+      ok: true,
+      text: "Bạn hay blunder ở tàn cuộc.",
+    });
     const s: TrendStats = {
       gameCount: 1,
       avgWhiteAccuracy: 50,

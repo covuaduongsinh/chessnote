@@ -56,13 +56,22 @@ describe("estimateBoardHeightPx", () => {
   });
 
   test("longer movetext adds more height", () => {
-    const short = estimateBoardHeightPx(400, { ...baseMeta, movetextLength: 20 });
-    const long = estimateBoardHeightPx(400, { ...baseMeta, movetextLength: 2000 });
+    const short = estimateBoardHeightPx(400, {
+      ...baseMeta,
+      movetextLength: 20,
+    });
+    const long = estimateBoardHeightPx(400, {
+      ...baseMeta,
+      movetextLength: 2000,
+    });
     expect(long).toBeGreaterThan(short);
   });
 
   test("a hint adds height", () => {
-    const withHint = estimateBoardHeightPx(400, { ...baseMeta, hintLength: 30 });
+    const withHint = estimateBoardHeightPx(400, {
+      ...baseMeta,
+      hintLength: 30,
+    });
     expect(withHint).toBeGreaterThan(estimateBoardHeightPx(400, baseMeta));
   });
 });
@@ -75,7 +84,11 @@ describe("estimateTextHeightPx", () => {
 
   test("longer text is taller", () => {
     const short = estimateTextHeightPx("Paragraph", "Hello world", 334);
-    const long = estimateTextHeightPx("Paragraph", "Hello world ".repeat(50), 334);
+    const long = estimateTextHeightPx(
+      "Paragraph",
+      "Hello world ".repeat(50),
+      334,
+    );
     expect(long).toBeGreaterThan(short);
   });
 
@@ -86,8 +99,12 @@ describe("estimateTextHeightPx", () => {
   });
 
   test("an unmapped node type falls back to the default line height without crashing", () => {
-    expect(() => estimateTextHeightPx("SomeUnknownNodeType", "text", 334)).not.toThrow();
-    expect(estimateTextHeightPx("SomeUnknownNodeType", "text", 334)).toBeGreaterThan(0);
+    expect(() =>
+      estimateTextHeightPx("SomeUnknownNodeType", "text", 334),
+    ).not.toThrow();
+    expect(
+      estimateTextHeightPx("SomeUnknownNodeType", "text", 334),
+    ).toBeGreaterThan(0);
   });
 });
 
@@ -125,14 +142,17 @@ describe("paginateUnits", () => {
     const placed = paginateUnits(units, 2, 1000);
     expect(placed).toHaveLength(3);
     const oversized = placed[1];
-    const sharingItsSlot = placed.filter((u, idx) =>
-      idx !== 1 && u.page === oversized.page && u.col === oversized.col
+    const sharingItsSlot = placed.filter(
+      (u, idx) =>
+        idx !== 1 && u.page === oversized.page && u.col === oversized.col,
     );
     expect(sharingItsSlot).toHaveLength(0);
   });
 
   test("(page, col) never moves backwards relative to input order", () => {
-    const units = Array.from({ length: 10 }, (_, i) => ({ estHeight: 150 + i * 37 }));
+    const units = Array.from({ length: 10 }, (_, i) => ({
+      estHeight: 150 + i * 37,
+    }));
     const placed = paginateUnits(units, 2, 1000);
     const rank = (u: { page: number; col: number }) => u.page * 2 + u.col;
     for (let i = 1; i < placed.length; i++) {
