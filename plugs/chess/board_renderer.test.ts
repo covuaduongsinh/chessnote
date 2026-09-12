@@ -75,6 +75,13 @@ describe("renderStaticBoardHtml", () => {
     expect(html).toContain("không hợp lệ");
   });
 
+  test("renders a kingless teaching diagram instead of an error banner", async () => {
+    const loneRook = "8/8/8/8/3R4/8/8/8 w - - 0 1";
+    const html = await renderStaticBoardHtml(loneRook);
+    expect(html).not.toContain("chess-error-banner");
+    expect((html.match(/class="chess-piece"/g) || []).length).toBe(1);
+  });
+
   test("includes the title when given", async () => {
     const html = await renderStaticBoardHtml(START_FEN, {
       title: "Vị trí khai cuộc",

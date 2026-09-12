@@ -120,6 +120,23 @@ rating: 1650`;
     expect(legalMoves("not a fen", "e2")).toEqual([]);
   });
 
+  // --- Kingless teaching diagrams (e.g. "every square a lone rook
+  // controls") — see fen_utils.ts's openChessLenient.
+
+  test("legalMoves still computes real destinations for a piece on a kingless FEN", async () => {
+    const loneRook = "8/8/8/8/3R4/8/8/8 w - - 0 1";
+    const moves = legalMoves(loneRook, "d4");
+    // A rook alone on an empty board controls its full rank + file (7 + 7).
+    expect(moves.length).toBe(14);
+  });
+
+  test("applyMove still plays a real move on a kingless FEN", async () => {
+    const loneRook = "8/8/8/8/3R4/8/8/8 w - - 0 1";
+    const result = applyMove(loneRook, "d4", "d8") as any;
+    expect(result.error).toBeUndefined();
+    expect(result.fen).toContain("3R4/8/8/8/8/8/8/8 b");
+  });
+
   test("applyMove plays a real legal move and reports the resulting position", async () => {
     const start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     const result = applyMove(start, "e2", "e4") as any;
@@ -165,6 +182,20 @@ rating: 1650`;
     const result: any = await fenWidget("not-a-real-fen", "TestPage");
     expect(result.script).toBeUndefined();
     expect(result.html).toContain("FEN không hợp lệ");
+  });
+
+  test("fenWidget renders a diagram (not an error) for a FEN missing one or both kings", async () => {
+    const noKingsAtAll = "8/8/8/8/3R4/8/8/8 w - - 0 1";
+    const missingBlackKing = "4K3/8/8/8/3R4/8/8/8 w - - 0 1";
+    for (const fen of [noKingsAtAll, missingBlackKing]) {
+      const result: any = await fenWidget(fen, "TestPage");
+      expect(result.html).not.toContain("FEN không hợp lệ");
+      expect(result.html).toContain("chessnote-container");
+      // Engine Eval makes no sense without a real position — hidden instead
+      // of silently returning a meaningless evaluation.
+      expect(result.html).toContain("Minh hoạ chiến thuật");
+      expect(result.html).toMatch(/_eval_toggle"[^>]*display: none/);
+    }
   });
 
   test("pgnWidget returns a visible error state for invalid PGN instead of silently resetting", async () => {

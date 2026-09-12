@@ -4,6 +4,7 @@ import {
   getBoardTheme,
   getPieceSet,
 } from "./external_syscalls.ts";
+import { openChessLenient } from "./fen_utils.ts";
 
 function escapeHtmlForBoard(str: string): string {
   return str
@@ -44,7 +45,7 @@ export async function renderStaticBoardHtml(
 
   let boardRows: ReturnType<Chess["board"]>;
   try {
-    boardRows = new Chess(fen).board();
+    boardRows = openChessLenient(fen).board();
   } catch (e) {
     return `<div class="chess-error-banner">FEN không hợp lệ: ${escapeHtmlForBoard(
       fen,

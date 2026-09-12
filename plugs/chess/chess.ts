@@ -2,6 +2,7 @@ import { system } from "@silverbulletmd/silverbullet/syscalls";
 import { Chess } from "chess.js";
 import { CHESS_CSS } from "./board_renderer.ts";
 import { findRelatedGames, type RelatedGameMatch } from "./related_games.ts";
+import { hasBothKings, openChessLenient } from "./fen_utils.ts";
 import {
   buildMoveList,
   generateBoardThemeCss,
@@ -96,7 +97,7 @@ export function legalMoves(
   square: string,
 ): { to: string; san: string; promotion: boolean }[] {
   try {
-    const chess = new Chess(fen);
+    const chess = openChessLenient(fen);
     const moves = chess.moves({ square: square as any, verbose: true });
     return moves.map((m) => ({
       to: m.to,
@@ -146,7 +147,7 @@ export function applyMove(
   promotion?: string,
 ): ChessMoveResult | { error: string } {
   try {
-    const chess = new Chess(fen);
+    const chess = openChessLenient(fen);
     const move = chess.move({ from, to, promotion: promotion || undefined });
     return describeResult(chess, move.san, move.captured);
   } catch (e) {
@@ -160,7 +161,7 @@ export function applySan(
   san: string,
 ): ChessMoveResult | { error: string } {
   try {
-    const chess = new Chess(fen);
+    const chess = openChessLenient(fen);
     const move = chess.move(san);
     return describeResult(chess, move.san, move.captured);
   } catch (e) {
@@ -233,8 +234,9 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     }
   }
 
+  let noKing: boolean;
   try {
-    new Chess(fen);
+    noKing = !hasBothKings(openChessLenient(fen));
   } catch (e) {
     return {
       html: errorWidgetHtml(
@@ -253,7 +255,11 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   ${generateThemeModalHtml(widgetId)}
   <div class="chess-header">
     <div class="chess-title">${escapeHtml(title)}</div>
-    <div class="chess-subtitle">FEN Interactive Board • Arasan Engine (NNUE, WASM)</div>
+    <div class="chess-subtitle">${
+      noKing
+        ? "Minh hoạ chiến thuật (không đủ 2 Vua — không hỗ trợ Engine Eval/chiếu hết)"
+        : "FEN Interactive Board • Arasan Engine (NNUE, WASM)"
+    }</div>
   </div>
   <div class="chessnote-layout">
     <div class="chessnote-board-container">
@@ -269,7 +275,9 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     <div class="chessnote-panel">
       <div class="chess-error-banner" id="${widgetId}_error" style="display: none;"></div>
       <div class="chess-controls">
-        <button class="chess-btn btn-engine" id="${widgetId}_eval_toggle">⚡ Engine Eval</button>
+        <button class="chess-btn btn-engine" id="${widgetId}_eval_toggle" style="${
+    noKing ? "display: none;" : ""
+  }">⚡ Engine Eval</button>
         <button class="chess-btn" id="${widgetId}_theme_btn" title="Tuỳ chỉnh bàn cờ và quân cờ">🎨 Theme</button>
         <button class="chess-btn" id="${widgetId}_flip">🔄 Flip</button>
         <button class="chess-btn" id="${widgetId}_reset">⏮ Reset</button>
