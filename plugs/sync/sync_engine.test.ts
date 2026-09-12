@@ -17,10 +17,16 @@ const dec = (b: Uint8Array) => new TextDecoder().decode(b);
  * không cần chạm tới syscall thật (không có runtime plug trong vitest). */
 class FakeSpace implements SpaceOps {
   files = new Map<string, { data: Uint8Array; lastModified: number }>();
+  readOnlyPaths = new Set<string>();
   private clock = 1_000;
 
   put(path: string, content: string, mtime?: number) {
     this.files.set(path, { data: enc(content), lastModified: mtime ?? this.tick() });
+  }
+  /** Simulates a Fallthrough-served baked-in file (server-common/src/space/embed.rs) — perm: "ro" in space.listFiles(). */
+  putReadOnly(path: string, content: string, mtime?: number) {
+    this.put(path, content, mtime);
+    this.readOnlyPaths.add(path);
   }
   tick() {
     return (this.clock += 1);
@@ -32,7 +38,7 @@ class FakeSpace implements SpaceOps {
       lastModified: f.lastModified,
       contentType: "text/markdown",
       size: f.data.byteLength,
-      perm: "rw" as const,
+      perm: this.readOnlyPaths.has(name) ? ("ro" as const) : ("rw" as const),
     }));
   }
   async readFile(path: string): Promise<Uint8Array> {
@@ -204,6 +210,29 @@ describe("performSync (generic, over any SyncProvider)", () => {
     expect(provider.uploadCalls).toEqual([
       { folder: "", path: "new.md", data: enc("hello"), mode: { tag: "add" } },
     ]);
+  });
+
+  test("ignores read-only (baked-in Library/Std) files entirely, even if a stray remote copy exists from a past bug", async () => {
+    const space = new FakeSpace();
+    space.putReadOnly("Library/Std/Config.md", "baked-in content");
+    // Bản sao lỡ đồng bộ từ trước (đúng bug đã sửa) — vẫn còn trên remote.
+    provider.seedRemote("Library/Std/Config.md", "stray old copy", "rev1");
+    space.put(
+      "_sync/fake-state.json",
+      JSON.stringify({ "Library/Std/Config.md": { localMtime: 100, remoteRev: "rev0" } }),
+    );
+
+    const report = await performSync(provider, "", space);
+
+    expect(report.uploaded).toEqual([]);
+    expect(report.downloaded).toEqual([]);
+    expect(report.conflicts).toEqual([]);
+    expect(report.errors).toEqual([]);
+    // Không bị ghi đè bằng bản remote cũ.
+    expect(dec(await space.readFile("Library/Std/Config.md"))).toBe("baked-in content");
+    // Không còn xuất hiện trong state đã lưu lại — tự dọn dần qua các lần chạy.
+    const savedState = JSON.parse(dec(await space.readFile("_sync/fake-state.json")));
+    expect(savedState["Library/Std/Config.md"]).toBeUndefined();
   });
 
   test("downloads a brand-new remote file into an empty space", async () => {

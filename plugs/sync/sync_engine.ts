@@ -145,15 +145,33 @@ export async function performSync(
     provider.listEntries(folder),
   ]);
 
+  // `space.listFiles()` returns the Fallthrough-merged listing (real Space
+  // files + the server's read-only baked-in Library/Std, perm: "ro" — see
+  // server-common/src/space/embed.rs) — not just this Space's own content.
+  // Those paths aren't ours to sync: excluded entirely (not just from
+  // localMap) so they're never uploaded, downloaded, reported as a conflict,
+  // or hit the server's write-guard for fallback-only paths. Same `perm`
+  // check already used by plugs/configuration-manager/libraries.ts's
+  // roguePlugs filter.
+  const readOnlyPaths = new Set(
+    localFiles.filter((f) => f.perm === "ro").map((f) => f.name),
+  );
+
   const localMap = new Map(
-    localFiles.filter((f) => f.name !== stateFilePath).map((f) => [f.name, f]),
+    localFiles
+      .filter((f) => f.name !== stateFilePath && !readOnlyPaths.has(f.name))
+      .map((f) => [f.name, f]),
   );
   const remoteMap = new Map<string, RemoteFileEntry>();
   for (const e of remoteEntries) {
     if (!e.deleted) remoteMap.set(e.path, e);
   }
   // Đường dẫn từng có mặt (local, remote hiện tại, hoặc trong state cũ).
-  const allPaths = new Set<string>([...localMap.keys(), ...remoteMap.keys(), ...Object.keys(state)]);
+  const allPaths = new Set<string>(
+    [...localMap.keys(), ...remoteMap.keys(), ...Object.keys(state)].filter(
+      (p) => !readOnlyPaths.has(p),
+    ),
+  );
 
   const report: SyncReport = {
     uploaded: [],
