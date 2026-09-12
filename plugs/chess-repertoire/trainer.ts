@@ -8,13 +8,17 @@
 // v1 này đổi lại có logic chấm điểm/lên lịch SRS kiểm chứng được đầy đủ qua
 // test (gradeFromMistakes thuần) — bàn cờ đồ hoạ là việc làm thêm tự nhiên
 // sau này, không phải sửa lại toàn bộ luồng dữ liệu.
-import { chessSql, editor } from "@silverbulletmd/silverbullet/syscalls";
+import { editor } from "@silverbulletmd/silverbullet/syscalls";
 import { Chess } from "chess.js";
+import {
+  getDueRepertoireLines,
+  recordRepertoireReview,
+} from "./external_syscalls.ts";
 
 const LINES_PER_SESSION = 10;
 
 type RepertoireLineRow = Awaited<
-  ReturnType<typeof chessSql.getDueRepertoireLines>
+  ReturnType<typeof getDueRepertoireLines>
 >[number];
 
 /** 0 lỗi = dễ (khoảng ôn lại dài hơn), 1 lỗi = tốt, ≥2 lỗi hoặc bỏ cuộc giữa chừng = khó/lại từ đầu. */
@@ -72,7 +76,7 @@ async function trainLine(
 
 /** Command "Chess: Ôn tập khai cuộc". */
 export async function commandRepertoireTrain() {
-  const dueLines = await chessSql.getDueRepertoireLines(LINES_PER_SESSION);
+  const dueLines = await getDueRepertoireLines(LINES_PER_SESSION);
   if (dueLines.length === 0) {
     await editor.flashNotification(
       "Không có biến khai cuộc nào đến hạn ôn tập.",
@@ -90,7 +94,7 @@ export async function commandRepertoireTrain() {
 
     const { mistakes, gaveUp } = await trainLine(line);
     const grade = gradeFromMistakes(mistakes, gaveUp);
-    await chessSql.recordRepertoireReview(line.ref, grade);
+    await recordRepertoireReview(line.ref, grade);
     completed++;
 
     await editor.flashNotification(

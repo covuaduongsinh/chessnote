@@ -30,12 +30,6 @@ export async function buildClient(): Promise<void> {
     jsx: "automatic",
     jsxFragment: "Fragment",
     jsxImportSource: "preact",
-    // The SQLite WASM binary (client/data/chess_sql_store.ts) is embedded
-    // directly into the bundle as a Uint8Array rather than fetched
-    // separately at runtime — avoids relative-path/host_prefix resolution
-    // issues across the three deploy targets (web, Capacitor mobile's baked
-    // base_fs.json, Tauri desktop).
-    loader: { ".wasm": "binary" },
   };
 
   const buildConfigs: Array<[String, esbuild.BuildOptions]> = [

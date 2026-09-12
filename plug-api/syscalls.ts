@@ -1,7 +1,5 @@
 export * from "./syscall.ts";
 export * as asset from "./syscalls/asset.ts";
-export * as chessEmbedding from "./syscalls/chess_embedding.ts";
-export * as chessSql from "./syscalls/chess_sql.ts";
 export * as clientStore from "./syscalls/client_store.ts";
 export * as codeWidget from "./syscalls/code_widget.ts";
 export * as config from "./syscalls/config.ts";

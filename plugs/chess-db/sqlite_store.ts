@@ -1,24 +1,47 @@
-// Embedded SQLite WASM cache for chess games — Phase 1 of the DBMS
-// integration (docs/plans/2026-09-11-dbms-sqlite-wasm-tich-hop.md). Proof of
-// concept for real SQL (filter + GROUP BY) over indexed games, something the
-// Object Index's prefix-scan-then-filter-in-JS model can't do.
+// Embedded SQLite WASM cache for chess games — originally Phase 1 of the
+// DBMS integration (docs/plans/2026-09-11-dbms-sqlite-wasm-tich-hop.md), now
+// its own plug (docs/plans/2026-09-12-lam-plug-co-vua-cai-dat-doc-lap.md):
+// runs entirely inside this plug's own Web Worker sandbox, the same way
+// plugs/chess-engine/arasan_engine.ts runs the Arasan WASM engine — nothing
+// about SQLite WASM actually needs the client main thread; that was a
+// design assumption from the original DBMS plan doc, not a real Worker
+// sandbox limitation (see the ADR in MEMORY.md for the full story).
 //
-// Lives in client/ (main thread), not plugs/chess/ (Web Worker Plug
-// Sandbox) — see CLAUDE.md "Plug Worker Sandbox". Exposed to plugs only via
-// the `chessSql` syscall (client/plugos/syscalls/chess_sql.ts).
+// The wasm binary is embedded directly into this plug's bundle (esbuild's
+// `binary` loader, client/plugos/plug_compile.ts) rather than loaded from a
+// Library asset like arasan_engine.ts's engine binary: unlike Arasan (a
+// genuinely optional, heavy engine users opt into per Space), chess-db is a
+// foundational dependency of chess-ai/chess-repertoire/chess — it must work
+// out of the box, in every Space, with no separate "Library: Install" step
+// (an earlier version of this file tried the Library-asset route and it
+// silently no-oped in any Space that hadn't installed that Library, since
+// nothing auto-provisions optional Library files into existing Spaces).
 //
-// Deliberately just a rebuildable cache, same philosophy as the Object Index
-// (ADR-002 in MEMORY.md): an in-memory `:memory:` database, wiped and
+// Proof of concept for real SQL (filter + GROUP BY) over indexed games,
+// something the Object Index's prefix-scan-then-filter-in-JS model can't
+// do. Deliberately just a rebuildable cache, same philosophy as the Object
+// Index (ADR-002 in MEMORY.md): an in-memory `:memory:` database, wiped and
 // rebuilt from the space's PGN blocks on every reload. No OPFS persistence
-// in Phase 1 — see the plan doc §1.3 for why (cross-platform OPFS support is
-// uneven, and rebuild cost is negligible at the game counts this app deals
-// with today).
+// — cross-platform OPFS support is uneven, and rebuild cost is negligible
+// at the game counts this app deals with today.
 //
 // The public sqlite-wasm .d.ts intentionally omits `sqlite3InitModule`'s
 // parameter list (https://github.com/sqlite/sqlite-wasm/pull/129), even
 // though the underlying Emscripten module still honors an options object at
 // runtime (confirmed against dist/index.mjs). SQLITE3_INIT casts around
 // that to pass `wasmBinary` and skip the network fetch entirely.
+//
+// `locateFile` is required too, not just `wasmBinary`: dist/index.mjs's
+// findWasmBinary() always computes a `wasmBinaryFile` key (used only for an
+// internal cache-equality check, `file == wasmBinaryFile && wasmBinary`)
+// via `new URL("sqlite3.wasm", import.meta.url)` UNLESS `Module.locateFile`
+// is set — and `import.meta.url` isn't a valid URL base once this module is
+// esbuild-bundled into a plug and evaluated inside the worker sandbox's
+// blob-URL context, so that `new URL()` throws synchronously ("Invalid
+// URL"), silently failing init() (caught below) even though `wasmBinary`
+// bytes were already supplied and the fetch itself was never needed.
+// Passing `locateFile` sidesteps that dead code path entirely; the string
+// it returns is never actually fetched.
 
 import type {
   Database,
@@ -26,8 +49,8 @@ import type {
   SqlValue,
 } from "@sqlite.org/sqlite-wasm";
 import sqlite3InitModule from "@sqlite.org/sqlite-wasm";
-// esbuild's `binary` loader (build/build_client.ts) turns this into an
-// embedded Uint8Array at build time — see client/types/wasm_asset.d.ts.
+// esbuild's `binary` loader (client/plugos/plug_compile.ts) turns this into
+// an embedded Uint8Array at build time — see client/types/wasm_asset.d.ts.
 import sqlite3Wasm from "@sqlite.org/sqlite-wasm/sqlite3.wasm";
 import { parsePgnDateToIso } from "./chess_pgn_date.ts";
 import { parseEloToInt } from "./chess_pgn_fields.ts";
@@ -35,6 +58,7 @@ import { type SrsGrade, sm2Update } from "./srs_sm2.ts";
 
 type Sqlite3InitFn = (opts?: {
   wasmBinary?: Uint8Array;
+  locateFile?: (path: string) => string;
 }) => Promise<Sqlite3Static>;
 const SQLITE3_INIT = sqlite3InitModule as unknown as Sqlite3InitFn;
 
@@ -105,7 +129,7 @@ const SCHEMA_STATEMENTS = [
   // "Chess: Tính embedding ngữ nghĩa" command), never automatically on save
   // — same reasoning as ai/tagging.ts's module comment for why AI-adjacent
   // work never runs on autosave. `embedding` is a raw float32 BLOB (see
-  // chess_embedding_store.ts's float32ToBytes/bytesToFloat32) — ranking is
+  // embedding_store.ts's float32ToBytes/bytesToFloat32) — ranking is
   // brute-force cosine similarity in JS (searchByEmbedding below), not a SQL
   // vector index: sqlite-vec's WASM-loadable-extension compatibility with
   // @sqlite.org/sqlite-wasm was flagged as unverified in the plan doc and
@@ -254,7 +278,7 @@ export interface RepertoireLineRow {
 export interface EmbeddingUpsert {
   ref: string;
   page: string;
-  /** Raw float32 bytes — see chess_embedding_store.ts's float32ToBytes(). */
+  /** Raw float32 bytes — see embedding_store.ts's float32ToBytes(). */
   embedding: Uint8Array;
   modelId: string;
 }
@@ -330,7 +354,10 @@ export class ChessSqlStore {
   }
 
   private async init(): Promise<void> {
-    const sqlite3 = await SQLITE3_INIT({ wasmBinary: sqlite3Wasm });
+    const sqlite3 = await SQLITE3_INIT({
+      wasmBinary: sqlite3Wasm,
+      locateFile: (path) => path,
+    });
     const db = new sqlite3.oo1.DB(":memory:");
     for (const statement of SCHEMA_STATEMENTS) {
       db.exec(statement);
@@ -443,7 +470,7 @@ export class ChessSqlStore {
        FROM chess_games_fts f
        JOIN chess_games g ON g.ref = f.ref
        WHERE f.blob MATCH ?
-       ORDER BY bm25(f)
+       ORDER BY bm25(chess_games_fts)
        LIMIT ?`,
       {
         bind: [matchQuery, query.limit],

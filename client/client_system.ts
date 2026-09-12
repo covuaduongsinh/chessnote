@@ -4,7 +4,6 @@ import { builtinPlugPaths } from "../plugs/builtin_plugs.ts";
 import type { Client } from "./client.ts";
 import { createCommandKeyBindings } from "./codemirror/editor_state.ts";
 import type { Config } from "./config.ts";
-import { ChessSqlStore } from "./data/chess_sql_store.ts";
 import type { DataStore } from "./data/datastore.ts";
 import type { DataStoreMQ } from "./data/mq.datastore.ts";
 import type { ObjectIndex } from "./data/object_index.ts";
@@ -29,8 +28,6 @@ import { SyscallHook } from "./plugos/hooks/syscall.ts";
 import { KVPrimitivesManifestCache } from "./plugos/manifest_cache.ts";
 import { WorkerSandbox } from "./plugos/sandboxes/worker_sandbox.ts";
 import assetSyscalls from "./plugos/syscalls/asset.ts";
-import { chessEmbeddingSyscalls } from "./plugos/syscalls/chess_embedding.ts";
-import { chessSqlSyscalls } from "./plugos/syscalls/chess_sql.ts";
 import { clientCodeWidgetSyscalls } from "./plugos/syscalls/client_code_widget.ts";
 import { clientStoreSyscalls } from "./plugos/syscalls/clientStore.ts";
 import { codeWidgetSyscalls } from "./plugos/syscalls/code_widget.ts";
@@ -98,10 +95,6 @@ export class ClientSystem {
   mqHook!: MQHook;
 
   serviceRegistry!: ServiceRegistry;
-
-  // Chess DBMS integration Phase 1 (docs/plans/2026-09-11-dbms-sqlite-wasm-tich-hop.md):
-  // an embedded SQLite WASM cache, exposed to plugs via the chessSql syscall.
-  readonly chessSqlStore = new ChessSqlStore();
 
   spaceLuaEnv: SpaceLuaEnvironment;
   readonly scriptCommands = new Map<string, Command>();
@@ -231,8 +224,6 @@ export class ClientSystem {
       languageSyscalls(),
       jsonschemaSyscalls(),
       indexSyscalls(this.objectIndex, this.client),
-      chessSqlSyscalls(this.chessSqlStore),
-      chessEmbeddingSyscalls(this.chessSqlStore),
       luaSyscalls(this.system, () => this.spaceLuaEnv.env),
       mqSyscalls(this.mq),
       serviceRegistrySyscalls(this.serviceRegistry),

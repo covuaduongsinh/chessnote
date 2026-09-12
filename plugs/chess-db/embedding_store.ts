@@ -17,9 +17,10 @@
 // whole DBMS plan — no live browser was available to confirm the model
 // actually downloads/runs; verify this first before relying on it.
 //
-// NOT wired into plugs/chess/ (Web Worker Plug Sandbox) directly, same
-// architecture constraint as chess_sql_store.ts — only reachable via the
-// `chessEmbedding` syscall (client/plugos/syscalls/chess_embedding.ts).
+// Runs directly inside this plug's own Web Worker sandbox (see
+// sqlite_store.ts's module comment for why that's fine) — exposed to other
+// plugs via the `chessEmbedding` syscall this plug's own manifest
+// (chess-db.plug.yaml) declares.
 
 /** Xenova's community ONNX port of intfloat/multilingual-e5-small — chosen for Vietnamese-language support at a comparatively small (quantized) download size. Verify this model id still resolves on the Hub before relying on it; swap here if not. */
 export const EMBEDDING_MODEL_ID = "Xenova/multilingual-e5-small";
@@ -63,7 +64,7 @@ export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   return dot / (Math.sqrt(magA) * Math.sqrt(magB));
 }
 
-/** Serializes an embedding for storage as a SQLite BLOB (chess_sql_store.ts's game_embeddings table) — a plain little-endian float32 byte dump, no framing needed since the dimension is fixed per model. */
+/** Serializes an embedding for storage as a SQLite BLOB (sqlite_store.ts's game_embeddings table) — a plain little-endian float32 byte dump, no framing needed since the dimension is fixed per model. */
 export function float32ToBytes(vec: Float32Array): Uint8Array {
   return new Uint8Array(vec.buffer, vec.byteOffset, vec.byteLength);
 }

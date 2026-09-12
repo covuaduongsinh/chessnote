@@ -1,13 +1,14 @@
 import { describe, expect, test, vi } from "vitest";
 
-// chess.ts now fetches piece-set/board-theme data from the chess-themes plug
-// via a syscall (see plugs/chess-themes/plug_api.ts) instead of importing it
-// directly — mock that boundary with the real theme data (just wrapped in a
-// resolved Promise) so these tests exercise real theme content without
-// needing a live syscall dispatcher.
-vi.mock("../chess-themes/plug_api.ts", async () => {
+// chess.ts now fetches piece-set/board-theme data (chess-themes) and move
+// lists (chess-engine) via its own local external_syscalls.ts wrapper (a
+// syscall, not a direct import — see that file's module comment) — mock
+// that boundary with the real theme/engine-free data so these tests exercise
+// real content without needing a live syscall dispatcher.
+vi.mock("./external_syscalls.ts", async () => {
   const boardThemes = await import("../chess-themes/board_themes.ts");
   const pieceSets = await import("../chess-themes/piece_sets.ts");
+  const gameReviewer = await import("../chess-engine/game_reviewer.ts");
   return {
     getPieceSet: (name?: string) =>
       Promise.resolve(pieceSets.getPieceSet(name)),
@@ -21,15 +22,6 @@ vi.mock("../chess-themes/plug_api.ts", async () => {
           theme as Parameters<typeof boardThemes.generateBoardThemeCss>[0],
         ),
       ),
-  };
-});
-
-// pgnWidget's cheap move-list navigation now goes through chess-engine's
-// plug_api (chess.engine.buildMoveList syscall) instead of a direct import —
-// mock it with the real, engine-free buildMoveList implementation.
-vi.mock("../chess-engine/plug_api.ts", async () => {
-  const gameReviewer = await import("../chess-engine/game_reviewer.ts");
-  return {
     buildMoveList: (pgn: string) =>
       Promise.resolve(gameReviewer.buildMoveList(pgn)),
   };

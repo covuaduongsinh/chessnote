@@ -10,6 +10,7 @@ export const builtinPlugNames = [
   "object-graph",
   "chess-themes",
   "chess-engine",
+  "chess-db",
   "chess-pdf-export",
   "chess-repertoire",
   "chess-ai",

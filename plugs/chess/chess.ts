@@ -1,14 +1,14 @@
 import { system } from "@silverbulletmd/silverbullet/syscalls";
 import { Chess } from "chess.js";
 import { CHESS_CSS } from "./board_renderer.ts";
-import { buildMoveList } from "../chess-engine/plug_api.ts";
 import { findRelatedGames, type RelatedGameMatch } from "./related_games.ts";
 import {
+  buildMoveList,
   generateBoardThemeCss,
   getAllBoardThemes,
   getAllPieceSets,
   getBoardTheme,
-} from "../chess-themes/plug_api.ts";
+} from "./external_syscalls.ts";
 
 function escapeHtml(str: string): string {
   return str

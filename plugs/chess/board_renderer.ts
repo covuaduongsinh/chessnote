@@ -3,7 +3,7 @@ import {
   generateBoardThemeCss,
   getBoardTheme,
   getPieceSet,
-} from "../chess-themes/plug_api.ts";
+} from "./external_syscalls.ts";
 
 function escapeHtmlForBoard(str: string): string {
   return str

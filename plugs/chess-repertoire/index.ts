@@ -13,12 +13,14 @@ import {
   findNodeOfType,
   type ParseTree,
 } from "@silverbulletmd/silverbullet/lib/tree";
-import { chessSql } from "@silverbulletmd/silverbullet/syscalls";
 import type { IndexTreeEvent } from "@silverbulletmd/silverbullet/type/event";
 import { Chess } from "chess.js";
-import type { FrontMatter } from "../index/frontmatter.ts";
-import { extractFrontMatter } from "../index/frontmatter.ts";
-import { isRepertoirePage } from "../chess/plug_api.ts";
+import {
+  extractFrontMatter,
+  type FrontMatter,
+  isRepertoirePage,
+  syncRepertoireLinesForPage,
+} from "./external_syscalls.ts";
 
 export interface RepertoireLineDraft {
   ref: string;
@@ -99,10 +101,10 @@ export function extractRepertoireLines(
  * on every save.
  */
 export async function indexRepertoireLines({ name, tree }: IndexTreeEvent) {
-  const frontmatter = extractFrontMatter(tree);
+  const frontmatter = await extractFrontMatter(tree);
   if (!(await isRepertoirePage(frontmatter))) {
     return;
   }
   const lines = extractRepertoireLines(name, tree, frontmatter);
-  await chessSql.syncRepertoireLinesForPage(name, lines);
+  await syncRepertoireLinesForPage(name, lines);
 }

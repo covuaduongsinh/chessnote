@@ -5,7 +5,7 @@
 // import chess-core's actual widget/rendering logic directly.
 import { syscall } from "@silverbulletmd/silverbullet/syscall";
 import type { ParseTree } from "@silverbulletmd/silverbullet/lib/tree";
-import type { FrontMatter } from "../index/frontmatter.ts";
+import type { FrontMatter } from "./external_syscalls.ts";
 import type { ChessGameObject } from "./index.ts";
 
 export function isRepertoirePage(frontmatter: FrontMatter): Promise<boolean> {

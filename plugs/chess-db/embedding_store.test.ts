@@ -3,7 +3,7 @@ import {
   bytesToFloat32,
   cosineSimilarity,
   float32ToBytes,
-} from "./chess_embedding_store.ts";
+} from "./embedding_store.ts";
 
 // embedText() itself needs a real (lazily downloaded) transformers.js model
 // — not exercised here, same "SQL/WASM-adjacent logic verified manually"

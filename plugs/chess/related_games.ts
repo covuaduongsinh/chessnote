@@ -16,7 +16,7 @@
 // — trước đó là vòng lặp JS thuần trên TOÀN BỘ ván lấy qua
 // index.queryLuaObjects mỗi lần render widget. Phần build text "reasons" vẫn
 // thuần TS (buildRelatedGameReasons), test được qua vitest mà không đụng WASM.
-import { chessSql } from "@silverbulletmd/silverbullet/syscalls";
+import { queryRelatedGames } from "./external_syscalls.ts";
 
 export interface RelatedGameMatch {
   page: string;
@@ -81,7 +81,7 @@ export async function findRelatedGames(
   current: { page: string; white: string; black: string; eco: string },
   limit = 5,
 ): Promise<RelatedGameMatch[]> {
-  const rows = await chessSql.queryRelatedGames({
+  const rows = await queryRelatedGames({
     page: current.page,
     white: meaningfulName(current.white),
     black: meaningfulName(current.black),

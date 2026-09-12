@@ -141,6 +141,11 @@ setupMessageListener(functionMapping, manifest, self.postMessage);
     metafile: options.info,
     treeShaking: true,
     plugins: [workerRuntimePlugin],
+    // Lets a plug `import bytes from "*.wasm"` and get back an embedded
+    // Uint8Array instead of a URL — mirrors build/build_client.ts's same
+    // loader. Generic PlugOS build capability (any plug bundling a binary
+    // asset benefits), not specific to any one plug.
+    loader: { ".wasm": "binary" },
   });
 
   if (options.info) {

@@ -1,9 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 
 // board_renderer.ts now fetches piece-set/board-theme data from the
-// chess-themes plug via a syscall instead of importing it directly — see the
-// same mock rationale in chess.test.ts.
-vi.mock("../chess-themes/plug_api.ts", async () => {
+// chess-themes plug via a syscall (chess-core's own external_syscalls.ts)
+// instead of importing it directly — see the same mock rationale in
+// chess.test.ts.
+vi.mock("./external_syscalls.ts", async () => {
   const boardThemes = await import("../chess-themes/board_themes.ts");
   const pieceSets = await import("../chess-themes/piece_sets.ts");
   return {

@@ -3,12 +3,21 @@ import {
   findNodeOfType,
   type ParseTree,
 } from "@silverbulletmd/silverbullet/lib/tree";
-import { chessSql, index } from "@silverbulletmd/silverbullet/syscalls";
+import { index } from "@silverbulletmd/silverbullet/syscalls";
 import type { IndexTreeEvent } from "@silverbulletmd/silverbullet/type/event";
 import type { ObjectValue } from "@silverbulletmd/silverbullet/type/index";
 import { Chess } from "chess.js";
-import { extractFrontMatter, type FrontMatter } from "../index/frontmatter.ts";
 import { normalize } from "./text_normalize.ts";
+import {
+  deleteAiAnnotationsForPage,
+  deleteEmbeddingsForPage,
+  deleteGamesForPage,
+  deleteRepertoireLinesForPage,
+  extractFrontMatter,
+  type FrontMatter,
+  syncAiAnnotationFromFrontmatter,
+  upsertGames,
+} from "./external_syscalls.ts";
 
 /**
  * One `chess-game` object per ```pgn``` code block found on a page. Header
@@ -170,7 +179,7 @@ function buildSearchBlob(
  * index plug's tags/headers/etc indexing don't step on each other.
  */
 export async function indexChessGames({ name, tree }: IndexTreeEvent) {
-  const frontmatter = extractFrontMatter(tree);
+  const frontmatter = await extractFrontMatter(tree);
   if (isTemplatePage(frontmatter) || isRepertoirePage(frontmatter)) {
     return;
   }
@@ -187,11 +196,11 @@ export async function indexChessGames({ name, tree }: IndexTreeEvent) {
   // the explicit "Chess: Tính embedding ngữ nghĩa" command) — this just
   // invalidates the now-stale one, same as chess-game-review's cache
   // invalidation (see ai/trends.ts's module comment).
-  await chessSql.deleteGamesForPage(name);
-  await chessSql.deleteAiAnnotationsForPage(name);
-  await chessSql.deleteEmbeddingsForPage(name);
+  await deleteGamesForPage(name);
+  await deleteAiAnnotationsForPage(name);
+  await deleteEmbeddingsForPage(name);
   if (games.length > 0) {
-    await chessSql.upsertGames(
+    await upsertGames(
       games.map((g) => ({
         ref: g.ref,
         page: g.page,
@@ -215,7 +224,7 @@ export async function indexChessGames({ name, tree }: IndexTreeEvent) {
     // confidence/model_version/generated_at (see chess_sql_store.ts's
     // syncAiAnnotationFromFrontmatter doc comment for why).
     for (const g of games) {
-      await chessSql.syncAiAnnotationFromFrontmatter({
+      await syncAiAnnotationFromFrontmatter({
         ref: g.ref,
         page: g.page,
         summary: frontmatterSummary(frontmatter),
@@ -233,10 +242,10 @@ export async function indexChessGames({ name, tree }: IndexTreeEvent) {
  * index.clearFileIndex() directly in that same early-return path).
  */
 export async function deleteChessGamesForPage(pageName: string) {
-  await chessSql.deleteGamesForPage(pageName);
-  await chessSql.deleteAiAnnotationsForPage(pageName);
-  await chessSql.deleteEmbeddingsForPage(pageName);
+  await deleteGamesForPage(pageName);
+  await deleteAiAnnotationsForPage(pageName);
+  await deleteEmbeddingsForPage(pageName);
   // Harmless no-op DELETE if pageName was never a repertoire page — no need
   // to re-read the (now-deleted) page's frontmatter just to check first.
-  await chessSql.deleteRepertoireLinesForPage(pageName);
+  await deleteRepertoireLinesForPage(pageName);
 }

@@ -1,0 +1,181 @@
+name: chess-db
+requiredPermissions:
+  - fetch
+functions:
+  chessSqlUpsertGames:
+    path: ./index.ts:upsertGames
+    syscall:
+      name: chessSql.upsertGames
+      description: Upserts chess game rows into the embedded SQLite cache.
+      parameters:
+        - { name: games, type: array }
+      returns:
+        - { type: object }
+  chessSqlDeleteGamesForPage:
+    path: ./index.ts:deleteGamesForPage
+    syscall:
+      name: chessSql.deleteGamesForPage
+      description: Deletes every chess game row belonging to a page from the SQLite cache.
+      parameters:
+        - { name: page, type: string }
+      returns:
+        - { type: object }
+  chessSqlQueryOpeningStats:
+    path: ./index.ts:queryOpeningStats
+    syscall:
+      name: chessSql.queryOpeningStats
+      description: >-
+        Groups indexed games by ECO code and tallies wins/losses/draws for a
+        player's color, via a real SQL GROUP BY over the embedded SQLite
+        cache.
+      parameters:
+        - { name: query, type: object }
+      returns:
+        - { type: array }
+  chessSqlSearchGames:
+    path: ./index.ts:searchGames
+    syscall:
+      name: chessSql.searchGames
+      description: >-
+        Full-text search (SQLite FTS5) over indexed games' metadata, AI
+        summary/tags, and PGN comments, ranked by relevance.
+      parameters:
+        - { name: query, type: object }
+      returns:
+        - { type: array }
+  chessSqlQueryRelatedGames:
+    path: ./index.ts:queryRelatedGames
+    syscall:
+      name: chessSql.queryRelatedGames
+      description: >-
+        Scores and ranks candidate games related to the given game (same
+        ECO, shared player) via SQL instead of a full JS scan.
+      parameters:
+        - { name: query, type: object }
+      returns:
+        - { type: array }
+  chessSqlUpsertAiAnnotation:
+    path: ./index.ts:upsertAiAnnotation
+    syscall:
+      name: chessSql.upsertAiAnnotation
+      description: >-
+        Structured storage for a real AI generation's output (summary/tags/
+        confidence/model), alongside the frontmatter a user sees on the
+        page.
+      parameters:
+        - { name: annotation, type: object }
+      returns:
+        - { type: object }
+  chessSqlSyncAiAnnotationFromFrontmatter:
+    path: ./index.ts:syncAiAnnotationFromFrontmatter
+    syscall:
+      name: chessSql.syncAiAnnotationFromFrontmatter
+      description: >-
+        Keeps the SQL summary/tags mirror in step with a page's frontmatter
+        on every save, without touching confidence/model attribution.
+      parameters:
+        - { name: sync, type: object }
+      returns:
+        - { type: object }
+  chessSqlDeleteAiAnnotationsForPage:
+    path: ./index.ts:deleteAiAnnotationsForPage
+    syscall:
+      name: chessSql.deleteAiAnnotationsForPage
+      description: Deletes every AI annotation row belonging to a page.
+      parameters:
+        - { name: page, type: string }
+      returns:
+        - { type: object }
+  chessSqlSyncRepertoireLinesForPage:
+    path: ./index.ts:syncRepertoireLinesForPage
+    syscall:
+      name: chessSql.syncRepertoireLinesForPage
+      description: >-
+        Reindex entry point: upserts a repertoire page's current lines
+        (preserving SRS review state) and removes only the lines that no
+        longer exist on the page.
+      parameters:
+        - { name: page, type: string }
+        - { name: lines, type: array }
+      returns:
+        - { type: object }
+  chessSqlDeleteRepertoireLinesForPage:
+    path: ./index.ts:deleteRepertoireLinesForPage
+    syscall:
+      name: chessSql.deleteRepertoireLinesForPage
+      description: Deletes every repertoire line belonging to a page.
+      parameters:
+        - { name: page, type: string }
+      returns:
+        - { type: object }
+  chessSqlDeleteEmbeddingsForPage:
+    path: ./index.ts:deleteEmbeddingsForPage
+    syscall:
+      name: chessSql.deleteEmbeddingsForPage
+      description: Deletes every semantic-search embedding belonging to a page.
+      parameters:
+        - { name: page, type: string }
+      returns:
+        - { type: object }
+  chessSqlGetDueRepertoireLines:
+    path: ./index.ts:getDueRepertoireLines
+    syscall:
+      name: chessSql.getDueRepertoireLines
+      description: Repertoire lines due today or never reviewed, earliest-due first.
+      parameters:
+        - { name: limit, type: number }
+      returns:
+        - { type: array }
+  chessSqlRecordRepertoireReview:
+    path: ./index.ts:recordRepertoireReview
+    syscall:
+      name: chessSql.recordRepertoireReview
+      description: >-
+        Applies an SRS grade (again/hard/good/easy) to a repertoire line via
+        SM-2 and persists the result.
+      parameters:
+        - { name: ref, type: string }
+        - { name: grade, type: string }
+      returns:
+        - { type: object }
+  chessSqlDebugDump:
+    path: ./index.ts:debugDump
+    syscall:
+      name: chessSql.debugDump
+      description: >-
+        Full dump of every chessSql-owned table, for the "Chess: Kiểm tra
+        dữ liệu SQLite (debug)" command.
+      returns:
+        - { type: object }
+  chessEmbeddingComputeForGame:
+    path: ./index.ts:computeForGame
+    syscall:
+      name: chessEmbedding.computeForGame
+      description: >-
+        Computes and stores a semantic embedding for one game's descriptive
+        text (lazily downloads the embedding model on first call — can be
+        slow).
+      parameters:
+        - { name: ref, type: string }
+        - { name: page, type: string }
+        - { name: text, type: string }
+      returns:
+        - { type: object }
+  chessEmbeddingHasAnyEmbeddings:
+    path: ./index.ts:hasAnyEmbeddings
+    syscall:
+      name: chessEmbedding.hasAnyEmbeddings
+      description: Whether any game in this space has a computed embedding yet.
+      returns:
+        - { type: boolean }
+  chessEmbeddingSearch:
+    path: ./index.ts:search
+    syscall:
+      name: chessEmbedding.search
+      description: >-
+        Semantic search: embeds the query text and ranks stored game
+        embeddings by cosine similarity.
+      parameters:
+        - { name: query, type: object }
+      returns:
+        - { type: array }
