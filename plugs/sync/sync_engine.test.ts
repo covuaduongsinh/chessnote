@@ -267,6 +267,30 @@ describe("performSync (generic, over any SyncProvider)", () => {
     expect(dec(await space.readFile(conflictFileName!))).toContain("remote edit");
   });
 
+  test("a resolved conflict converges: the very next sync sees no further changes", async () => {
+    const space = new FakeSpace();
+    space.put("game.md", "local edit", 500);
+    space.put("_sync/fake-state.json", JSON.stringify({ "game.md": { localMtime: 100, remoteRev: "rev0" } }));
+    provider.seedRemote("game.md", "remote edit", "rev1");
+
+    const first = await performSync(provider, "", space);
+    expect(first.conflicts).toEqual(["game.md"]);
+    const conflictFileName = [...space.files.keys()].find((k) => k.includes(".conflict-"))!;
+    provider.uploadCalls = []; // reset call log to isolate the second run's behavior
+
+    const second = await performSync(provider, "", space);
+
+    expect(second.conflicts).toEqual([]);
+    // The conflict-backup file itself is a legitimate brand-new local file as
+    // of this second run (never synced before) -- it SHOULD get uploaded once,
+    // same as any other new page. What must NOT happen is "game.md" itself
+    // showing up again as changed/uploaded/conflicting.
+    expect(second.uploaded).toEqual([conflictFileName]);
+    expect(second.downloaded).toEqual([]);
+    expect(second.errors).toEqual([]);
+    expect(provider.uploadCalls.map((c) => c.path)).toEqual([conflictFileName]);
+  });
+
   test("remote deleted + local unchanged since last sync -> propagates the deletion locally", async () => {
     const space = new FakeSpace();
     space.put("gone.md", "old content", 100);
