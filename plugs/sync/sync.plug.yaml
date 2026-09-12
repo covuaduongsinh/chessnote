@@ -63,6 +63,10 @@ functions:
     path: "./dropbox_bridge.ts:commandDropboxLogout"
     command:
       name: "Chess: Đăng xuất Dropbox"
+  dropboxDiagnoseCommand:
+    path: "./dropbox_bridge.ts:commandDropboxDiagnose"
+    command:
+      name: "Chess: Chẩn đoán đồng bộ Dropbox (không ghi gì)"
 
   # WebDAV Sync (Giai đoạn A — tổng quát hoá từ Dropbox)
   webdavInit:

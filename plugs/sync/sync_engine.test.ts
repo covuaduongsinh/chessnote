@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest";
 import type { FileMeta } from "@silverbulletmd/silverbullet/type/index";
 import {
+  diagnoseSync,
   performSync,
   conflictPath,
   isUtf8Decodable,
@@ -417,5 +418,50 @@ describe("performSync state file path (multi-provider isolation)", () => {
     const webdavState = JSON.parse(dec(await space.readFile("_sync/webdav-state.json")));
     expect(dropboxState["shared.md"]).toBeDefined();
     expect(webdavState["shared.md"]).toBeDefined();
+  });
+});
+
+describe("diagnoseSync (read-only dry run)", () => {
+  let provider: FakeSyncProvider;
+
+  beforeEach(() => {
+    provider = new FakeSyncProvider();
+  });
+
+  test("reports a genuine two-sided conflict without writing anything", async () => {
+    const space = new FakeSpace();
+    space.put("game.md", "local edit", 500);
+    space.put("_sync/fake-state.json", JSON.stringify({ "game.md": { localMtime: 100, remoteRev: "rev0" } }));
+    provider.seedRemote("game.md", "remote edit", "rev1");
+
+    const diffs = await diagnoseSync(provider, "", space);
+
+    expect(diffs).toEqual([
+      { path: "game.md", localMtime: 500, priorLocalMtime: 100, remoteRev: "rev1", priorRemoteRev: "rev0" },
+    ]);
+    // Không ghi gì cả: không có file .conflict-*, không có lời gọi upload/download.
+    expect([...space.files.keys()]).toEqual(["game.md", "_sync/fake-state.json"]);
+    expect(provider.uploadCalls).toEqual([]);
+  });
+
+  test("reports nothing when nothing has changed on either side", async () => {
+    const space = new FakeSpace();
+    space.put("game.md", "same", 100);
+    space.put("_sync/fake-state.json", JSON.stringify({ "game.md": { localMtime: 100, remoteRev: "rev0" } }));
+    provider.seedRemote("game.md", "same", "rev0");
+
+    expect(await diagnoseSync(provider, "", space)).toEqual([]);
+  });
+
+  test("ignores read-only baked-in files, same as performSync", async () => {
+    const space = new FakeSpace();
+    space.putReadOnly("Library/Std/Config.md", "baked-in", 500);
+    provider.seedRemote("Library/Std/Config.md", "stray old copy", "rev1");
+    space.put(
+      "_sync/fake-state.json",
+      JSON.stringify({ "Library/Std/Config.md": { localMtime: 100, remoteRev: "rev0" } }),
+    );
+
+    expect(await diagnoseSync(provider, "", space)).toEqual([]);
   });
 });

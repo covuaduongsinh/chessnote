@@ -132,6 +132,73 @@ export function syncReportIsNotable(report: SyncReport): boolean {
   );
 }
 
+export interface SyncDiagnosis {
+  path: string;
+  localMtime: number;
+  priorLocalMtime?: number;
+  remoteRev: string;
+  priorRemoteRev?: string;
+}
+
+/**
+ * Dry-run chẩn đoán: liệt kê mọi path mà `performSync` SẼ coi là "xung đột
+ * thật" (cả hai bên đổi so với lần đồng bộ trước) NẾU chạy ngay bây giờ —
+ * nhưng KHÔNG ghi bất cứ gì (không tạo file `.conflict-*`, không upload,
+ * không download, không lưu state). Dùng để điều tra một vòng lặp xung đột
+ * đang diễn ra trên production mà không làm nó tệ thêm — xem
+ * docs/plans (sự cố CONFIG.md/index.md liên tục xung đột, 2026-09-12).
+ */
+export async function diagnoseSync(
+  provider: SyncProvider,
+  folder: string,
+  spaceOps: SpaceOps,
+): Promise<SyncDiagnosis[]> {
+  const stateFilePath = stateFilePathFor(provider);
+  const state = await loadState(spaceOps, stateFilePath);
+
+  const [localFiles, remoteEntries] = await Promise.all([
+    spaceOps.listFiles(),
+    provider.listEntries(folder),
+  ]);
+
+  const readOnlyPaths = new Set(
+    localFiles.filter((f) => f.perm === "ro").map((f) => f.name),
+  );
+  const localMap = new Map(
+    localFiles
+      .filter((f) => f.name !== stateFilePath && !readOnlyPaths.has(f.name))
+      .map((f) => [f.name, f]),
+  );
+  const remoteMap = new Map<string, RemoteFileEntry>();
+  for (const e of remoteEntries) {
+    if (!e.deleted) remoteMap.set(e.path, e);
+  }
+  const allPaths = new Set<string>(
+    [...localMap.keys(), ...remoteMap.keys(), ...Object.keys(state)].filter(
+      (p) => !readOnlyPaths.has(p),
+    ),
+  );
+
+  const out: SyncDiagnosis[] = [];
+  for (const path of allPaths) {
+    const local = localMap.get(path);
+    const remote = remoteMap.get(path);
+    const prior = state[path];
+    const localChanged = !prior ? Boolean(local) : local?.lastModified !== prior.localMtime;
+    const remoteChanged = !prior ? Boolean(remote) : remote?.rev !== prior.remoteRev;
+    if (local && remote && prior && localChanged && remoteChanged) {
+      out.push({
+        path,
+        localMtime: local.lastModified,
+        priorLocalMtime: prior.localMtime,
+        remoteRev: remote.rev,
+        priorRemoteRev: prior.remoteRev,
+      });
+    }
+  }
+  return out;
+}
+
 export async function performSync(
   provider: SyncProvider,
   folder: string,

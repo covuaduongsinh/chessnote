@@ -12,6 +12,7 @@ import {
 } from "./dropbox_sync.ts";
 import { DropboxSyncProvider } from "./dropbox_provider.ts";
 import {
+  diagnoseSync,
   performSync,
   realSpaceOps,
   summarizeSyncErrorDetails,
@@ -187,5 +188,50 @@ export async function commandDropboxSync() {
     );
   } catch (e) {
     await editor.flashNotification(`Đồng bộ Dropbox thất bại: ${(e as Error).message}`, "error");
+  }
+}
+
+/**
+ * Command "Chess: Chẩn đoán đồng bộ Dropbox (không ghi gì)" — điều tra sự cố
+ * xung đột lặp lại (2026-09-12: CONFIG.md/index.md cứ vài phút lại xung đột
+ * dù không ai chỉnh sửa) mà KHÔNG rủi ro làm nó tệ thêm: chỉ gọi
+ * `listEntries`/`listFiles` (đọc), không upload/download/ghi file conflict/
+ * lưu state. An toàn để chạy nhiều lần khi đang tìm nguyên nhân gốc.
+ */
+export async function commandDropboxDiagnose() {
+  const appKey = await getAppKey();
+  if (!appKey) {
+    await editor.flashNotification(NOT_CONFIGURED_HINT, "error");
+    return;
+  }
+  const tokens: DropboxTokens | undefined = await clientStore.get(TOKENS_KEY);
+  if (!tokens) {
+    await editor.flashNotification('Chưa đăng nhập Dropbox. Chạy "Chess: Đăng nhập Dropbox" trước.', "error");
+    return;
+  }
+
+  const folder = await getSyncFolder();
+  try {
+    const provider = new DropboxSyncProvider({
+      appKey,
+      getTokens: () => clientStore.get(TOKENS_KEY),
+      saveTokens: (t: DropboxTokens) => clientStore.set(TOKENS_KEY, t),
+    });
+    const diffs = await diagnoseSync(provider, folder, realSpaceOps);
+    if (diffs.length === 0) {
+      await editor.flashNotification(
+        "Chẩn đoán (không ghi gì): không có file nào đang xung đột thật ngay lúc này.",
+        "info",
+      );
+      return;
+    }
+    const lines = diffs.map(
+      (d) =>
+        `${d.path} — local mtime ${d.priorLocalMtime}→${d.localMtime}, ` +
+        `remote rev ${JSON.stringify(d.priorRemoteRev)}→${JSON.stringify(d.remoteRev)}`,
+    );
+    await editor.flashNotification(`CHẨN ĐOÁN XUNG ĐỘT (không ghi gì): ${lines.join(" || ")}`, "warning");
+  } catch (e) {
+    await editor.flashNotification(`Chẩn đoán thất bại: ${(e as Error).message}`, "error");
   }
 }
