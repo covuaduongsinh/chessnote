@@ -69,6 +69,17 @@ timeline
 
 ---
 
+### 📌 ADR-005: Tách `plugs/chess/` Thành 6 Plug Độc Lập + Mirror Sang Repo GitHub Riêng
+* **Bối cảnh**: Sau khi bổ sung tầng DBMS SQLite (xem `docs/plans/2026-09-11-dbms-sqlite-wasm-tich-hop.md`), `plugs/chess/` trở thành một plug độc khối quá lớn (bàn cờ, engine, AI, PDF export, repertoire đều gộp chung), khó cài đặt/gỡ từng phần và khó theo dõi thay đổi riêng biệt.
+* **Quyết định**:
+  - Tách thành 6 plug: `chess-themes`, `chess-engine`, `chess-pdf-export`, `chess-repertoire`, `chess-ai`, và `chess` (core — widget bàn cờ, chỉ mục ván cờ, ván liên quan, nền tảng mọi plug khác phụ thuộc vào).
+  - Lời gọi xuyên plug đi qua **syscall** (đúng pattern `chess.engineEval` đã có sẵn) hoặc file `plug_api.ts` mỏng bọc syscall — không còn `import` TypeScript trực tiếp giữa các plug, để mỗi plug thực sự là 1 `.plug.js` độc lập.
+  - Mỗi plug được mirror sang 1 repo GitHub riêng dưới tài khoản `covuaduongsinh`, tên `chessnote-plug-<tên>`: 5 repo **private** (`engine`, `pdf-export`, `repertoire`, `ai`, `core` — chỉ để quản lý version/source, README ghi rõ không cài độc lập được vì phụ thuộc syscall lõi `chessSql`/`chessEmbedding` chỉ có trong ChessNote) và 1 repo **public** (`themes` — plug duy nhất không phụ thuộc gì, có kèm sẵn `chess-themes.plug.js` đã build + trang Library, cài được thật qua lệnh "Library: Install" với URL `https://raw.githubusercontent.com/covuaduongsinh/chessnote-plug-themes/main/chess-themes-library.md`).
+* **Lỗi kỹ thuật đã phát hiện & xử lý khi tách**: `EngineNotInstalledError` mất class identity khi đi qua ranh giới syscall Worker (chỉ `.message` sống sót) — sửa bằng cách so khớp message string (`isEngineNotInstalledError()` trong `chess-engine/plug_api.ts`) thay vì `instanceof`.
+* **Hệ quả**: Repo `chessnote` chính vẫn là nơi build/phát triển thật; 5 repo private là bản mirror thủ công (không tự động đồng bộ — cần copy tay khi source đổi), `chessnote-plug-themes` là plug portable thật sự đầu tiên của dự án.
+
+---
+
 ## 3. Lộ Trình Phát Triển Tương Lai (Future Roadmap)
 
 * [ ] **Tích hợp Stockfish 17+ WASM NNUE**: Bổ sung thêm tùy chọn động cơ Stockfish mạnh mẽ song song với Arasan.
