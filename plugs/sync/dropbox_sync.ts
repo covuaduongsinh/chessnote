@@ -139,6 +139,16 @@ export interface DropboxClientDeps {
   appKey: string;
   getTokens: () => Promise<DropboxTokens | undefined>;
   saveTokens: (tokens: DropboxTokens) => Promise<void>;
+  /**
+   * Gọi ngay TRƯỚC mỗi lần chờ do bị Dropbox trả 429 (rate limit) -- không có
+   * tác dụng nào khác lên luồng chạy. Thêm sau sự cố 2026-09-12: "Chess:
+   * Đồng bộ Dropbox" trông như treo vô thời hạn (không báo lỗi, không báo thành
+   * công) trong lúc thật ra đang chờ lùi lại 429 sau một đợt gọi API dồn dập
+   * lúc điều tra sự cố khác -- không có cách nào phân biệt "treo thật" với
+   * "đang chờ lùi lại" từ bên ngoài Worker bằng console.log (không xem được
+   * qua công cụ debug trình duyệt hiện có).
+   */
+  onRateLimited?: (info: { attempt: number; maxAttempts: number; waitMs: number }) => void;
 }
 
 const TOKEN_EXPIRY_SKEW_MS = 60_000;
@@ -181,6 +191,7 @@ async function apiFetch(
     const retryAfterHeader = res.headers.get("retry-after");
     const retryAfterS = retryAfterHeader ? Number(retryAfterHeader) : NaN;
     const waitMs = Number.isFinite(retryAfterS) ? retryAfterS * 1000 : 500 * 2 ** attempt;
+    deps.onRateLimited?.({ attempt: attempt + 1, maxAttempts: MAX_RETRIES, waitMs });
     await sleep(waitMs);
     return apiFetch(deps, url, init, attempt + 1);
   }

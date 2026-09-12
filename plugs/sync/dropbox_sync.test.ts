@@ -173,6 +173,21 @@ describe("apiFetch behavior (via uploadFile as a representative call)", () => {
     expect(nativeFetch).toHaveBeenCalledTimes(2);
   });
 
+  test("429 calls onRateLimited before each backoff wait, so a slow retry isn't mistaken for a silent hang", async () => {
+    const onRateLimited = vi.fn();
+    const deps = makeDeps({ onRateLimited });
+    // retry-after: "0" keeps the test fast (real setTimeout, not mocked) --
+    // only the callback plumbing is under test here, not the wait duration.
+    (nativeFetch as any)
+      .mockResolvedValueOnce(jsonResponse(429, {}, { "retry-after": "0" }))
+      .mockResolvedValueOnce(jsonResponse(200, { rev: "rev1", server_modified: "x" }));
+
+    await uploadFile(deps, "/a.md", new Uint8Array([1]), { tag: "add" });
+
+    expect(onRateLimited).toHaveBeenCalledTimes(1);
+    expect(onRateLimited).toHaveBeenCalledWith({ attempt: 1, maxAttempts: 5, waitMs: 0 });
+  });
+
   test("429 gives up after MAX_RETRIES and returns the failing response as an error", async () => {
     const deps = makeDeps();
     (nativeFetch as any).mockResolvedValue(jsonResponse(429, {}, { "retry-after": "0" }));

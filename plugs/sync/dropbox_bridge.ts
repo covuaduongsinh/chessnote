@@ -60,6 +60,18 @@ export async function initDropboxConfig() {
   });
 }
 
+/** Dùng chung cho mọi chỗ tạo `DropboxSyncProvider` -- biến "im lặng chờ lùi
+ * lại 429" thành 1 thông báo thấy được, thay vì trông như treo (sự cố
+ * 2026-09-12: "Chess: Đồng bộ Dropbox" không báo gì suốt nhiều phút, không
+ * cách nào phân biệt "treo thật" với "đang lùi lại 429" từ bên ngoài). */
+function notifyRateLimited(info: { attempt: number; maxAttempts: number; waitMs: number }) {
+  void editor.flashNotification(
+    `Dropbox đang giới hạn tốc độ (429) — chờ ${Math.ceil(info.waitMs / 1000)}s rồi thử lại ` +
+      `(lần ${info.attempt}/${info.maxAttempts})...`,
+    "warning",
+  );
+}
+
 const NOT_CONFIGURED_HINT =
   'Chưa cấu hình Dropbox App key. Mở Configuration Manager, tạo App key tại ' +
   "dropbox.com/developers/apps rồi điền vào mục \"Dropbox Sync\".";
@@ -144,6 +156,7 @@ export async function runDropboxSync(): Promise<SyncReport | null> {
       appKey,
       getTokens: () => clientStore.get(TOKENS_KEY),
       saveTokens: (t: DropboxTokens) => clientStore.set(TOKENS_KEY, t),
+      onRateLimited: notifyRateLimited,
     });
     const provider = await wrapProviderWithE2eeIfEnabled(baseProvider);
     const report = await performSync(provider, folder, realSpaceOps);
@@ -216,6 +229,7 @@ export async function commandDropboxDiagnose() {
       appKey,
       getTokens: () => clientStore.get(TOKENS_KEY),
       saveTokens: (t: DropboxTokens) => clientStore.set(TOKENS_KEY, t),
+      onRateLimited: notifyRateLimited,
     });
     const diffs = await diagnoseSync(provider, folder, realSpaceOps);
     if (diffs.length === 0) {
