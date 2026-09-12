@@ -4,7 +4,7 @@ import {
   centipawnsToWinChance,
   formatScore,
   parseUciInfoLine,
-} from "./engine/uci_protocol.ts";
+} from "./uci_protocol.ts";
 
 // reviewGame() calls the real Arasan WASM engine via evalPosition(), which
 // needs a running plug worker (space.readFile) that doesn't exist in this
@@ -13,7 +13,7 @@ import {
 // math, which is what this test actually verifies (arasan_engine.ts's real
 // UCI behavior is covered separately, see docs/plans/2026-09-07-*, Giai
 // đoạn 2's nhật ký, for the Node/browser verification of the real engine).
-vi.mock("./engine/arasan_engine.ts", () => ({
+vi.mock("./arasan_engine.ts", () => ({
   evalPosition: vi.fn(async (fen: string) => {
     const chess = new Chess(fen);
     const values: Record<string, number> = {
@@ -42,7 +42,7 @@ vi.mock("./engine/arasan_engine.ts", () => ({
   }),
 }));
 
-const { reviewGame, buildMoveList } = await import("./engine/game_reviewer.ts");
+const { reviewGame, buildMoveList } = await import("./game_reviewer.ts");
 
 describe("Chess Engine & Game Review Unit Tests", () => {
   test("parseUciInfoLine correctly parses depth, score cp, nodes, pv", () => {
@@ -115,7 +115,7 @@ describe("Chess Engine & Game Review Unit Tests", () => {
   });
 
   test("reviewGame never calls the engine on a position with no legal moves (checkmate)", async () => {
-    const { evalPosition } = await import("./engine/arasan_engine.ts");
+    const { evalPosition } = await import("./arasan_engine.ts");
     vi.mocked(evalPosition).mockClear();
     await reviewGame(scholarsMatePgn, 10);
     // 7 plies -> 8 positions total, but the final (checkmated) position must

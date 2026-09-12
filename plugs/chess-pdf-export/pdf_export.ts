@@ -6,8 +6,9 @@ import {
 } from "@silverbulletmd/silverbullet/lib/tree";
 import { markdown } from "@silverbulletmd/silverbullet/syscalls";
 import { Chess } from "chess.js";
-import { CHESS_CSS, renderStaticBoardHtml } from "./board_renderer.ts";
-import { buildMoveList, type MoveListEntry } from "./engine/game_reviewer.ts";
+import { getChessCss, renderStaticBoardHtml } from "../chess/plug_api.ts";
+import { buildMoveList } from "../chess-engine/plug_api.ts";
+import type { MoveListEntry } from "../chess-engine/game_reviewer.ts";
 import {
   type BoardMeta,
   computeColumnGeometry,
@@ -160,7 +161,7 @@ interface BoardRender {
 }
 
 /** `fen` block body: first line is the FEN, optional `| key: value` lines follow (see `fenWidget`). */
-function renderFenBlockForPdf(bodyText: string): BoardRender {
+async function renderFenBlockForPdf(bodyText: string): Promise<BoardRender> {
   const lines = bodyText.trim().split("\n");
   const fen = lines[0]?.trim() ?? "";
   let title = "";
@@ -183,7 +184,7 @@ function renderFenBlockForPdf(bodyText: string): BoardRender {
       boardTheme = line.replace(/\| (boardTheme|theme|board):/, "").trim();
     }
   }
-  const html = renderStaticBoardHtml(fen, {
+  const html = await renderStaticBoardHtml(fen, {
     title,
     orientation,
     showFen: false,
@@ -203,7 +204,9 @@ function renderFenBlockForPdf(bodyText: string): BoardRender {
 }
 
 /** `puzzle` block body: `key: value` lines (see `puzzleWidget`) — only `fen`/`hint` matter for a static print. */
-function renderPuzzleBlockForPdf(bodyText: string): BoardRender {
+async function renderPuzzleBlockForPdf(
+  bodyText: string,
+): Promise<BoardRender> {
   const lines = bodyText.trim().split("\n");
   let fen = "";
   let hint = "";
@@ -229,7 +232,7 @@ function renderPuzzleBlockForPdf(bodyText: string): BoardRender {
     }
   }
   const title = "Bài tập cờ";
-  const board = renderStaticBoardHtml(fen, {
+  const board = await renderStaticBoardHtml(fen, {
     title,
     showFen: false,
     pieceSet,
@@ -311,7 +314,7 @@ function resolveDisplayMove(
  * (see `resolveDisplayMove`), in which case the board shows that position and
  * the title notes which move it is.
  */
-function renderPgnBlockForPdf(bodyText: string): BoardRender {
+async function renderPgnBlockForPdf(bodyText: string): Promise<BoardRender> {
   const trimmedPgn = bodyText.trim();
   let chess: Chess;
   try {
@@ -342,7 +345,7 @@ function renderPgnBlockForPdf(bodyText: string): BoardRender {
 
   let moves: MoveListEntry[] = [];
   try {
-    moves = buildMoveList(trimmedPgn);
+    moves = await buildMoveList(trimmedPgn);
   } catch {
     // Malformed PGN already surfaced above via the loadPgn catch; an empty
     // move list here just means no moves to list/display, not a second error.
@@ -356,7 +359,7 @@ function renderPgnBlockForPdf(bodyText: string): BoardRender {
   const title = `${white} vs ${black} (${result})${titleSuffix}`;
   const pieceSet = header["PieceSet"] || header["Pieces"] || "merida";
   const boardTheme = header["BoardTheme"] || header["Theme"] || "textbook";
-  const board = renderStaticBoardHtml(
+  const board = await renderStaticBoardHtml(
     displayMove?.entry.fenAfter ?? START_POSITION_FEN,
     {
       title,
@@ -390,14 +393,17 @@ function fenceLang(node: ParseTree): string | undefined {
   return codeInfoNode?.children?.[0]?.text;
 }
 
-function renderFenceForPdf(node: ParseTree, lang: string): BoardRender {
+async function renderFenceForPdf(
+  node: ParseTree,
+  lang: string,
+): Promise<BoardRender> {
   const codeTextNode = findNodeOfType(node, "CodeText");
   const body = codeTextNode?.children?.[0]?.text ?? "";
   return lang === "fen"
-    ? renderFenBlockForPdf(body)
+    ? await renderFenBlockForPdf(body)
     : lang === "pgn"
-      ? renderPgnBlockForPdf(body)
-      : renderPuzzleBlockForPdf(body);
+      ? await renderPgnBlockForPdf(body)
+      : await renderPuzzleBlockForPdf(body);
 }
 
 type PdfBlock =
@@ -446,7 +452,7 @@ export async function renderPageForPdf(
   for (const node of collectNodesOfType(tree, "FencedCode")) {
     const lang = fenceLang(node);
     if (lang !== "fen" && lang !== "pgn" && lang !== "puzzle") continue;
-    boardByNode.set(node, renderFenceForPdf(node, lang));
+    boardByNode.set(node, await renderFenceForPdf(node, lang));
   }
 
   const blocks: PdfBlock[] = [];
@@ -568,5 +574,5 @@ export async function renderPageForPdf(
     bodyHtml += `</div>`;
   }
 
-  return `<style>${CHESS_CSS}${buildPdfExtraCss(clampedBoardSize)}</style>${bodyHtml}`;
+  return `<style>${await getChessCss()}${buildPdfExtraCss(clampedBoardSize)}</style>${bodyHtml}`;
 }

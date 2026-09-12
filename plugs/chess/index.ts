@@ -8,7 +8,7 @@ import type { IndexTreeEvent } from "@silverbulletmd/silverbullet/type/event";
 import type { ObjectValue } from "@silverbulletmd/silverbullet/type/index";
 import { Chess } from "chess.js";
 import { extractFrontMatter, type FrontMatter } from "../index/frontmatter.ts";
-import { normalize } from "./ai/text_normalize.ts";
+import { normalize } from "./text_normalize.ts";
 
 /**
  * One `chess-game` object per ```pgn``` code block found on a page. Header
@@ -120,7 +120,7 @@ export function isTemplatePage(frontmatter: FrontMatter): boolean {
  * libraries/Library/Chess/Templates/Opening_Repertoire.md) embed ```pgn```
  * blocks too — one per line/variation (Phase 4 of the DBMS plan) — but those
  * aren't real played games (`White: "Repertoire Master"` placeholder, etc.).
- * Routed to plugs/chess/repertoire/index.ts's own indexer instead, excluded
+ * Routed to plugs/chess-repertoire/index.ts's own indexer instead, excluded
  * here the same way isTemplatePage() excludes templates, so they don't
  * pollute chess_games/trends/related-games/QA with fake games.
  */
@@ -132,8 +132,8 @@ export function isRepertoirePage(frontmatter: FrontMatter): boolean {
  * Text blob fed into the FTS5 index (Phase 2 of the DBMS plan): metadata +
  * tags/AI summary from the page's frontmatter + PGN move comments, all
  * normalized (diacritics stripped, lowercased) via
- * plugs/chess/ai/text_normalize.ts so it matches the same normalization
- * applied to search keywords in ai/qa.ts.
+ * plugs/chess/text_normalize.ts so it matches the same normalization
+ * applied to search keywords in plugs/chess-ai/qa.ts (via chess/plug_api.ts).
  */
 function frontmatterSummary(frontmatter: FrontMatter): string {
   return typeof frontmatter.chessSummary === "string"

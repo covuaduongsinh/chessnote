@@ -1,15 +1,14 @@
 import { system } from "@silverbulletmd/silverbullet/syscalls";
 import { Chess } from "chess.js";
 import { CHESS_CSS } from "./board_renderer.ts";
-import { buildMoveList } from "./engine/game_reviewer.ts";
+import { buildMoveList } from "../chess-engine/plug_api.ts";
 import { findRelatedGames, type RelatedGameMatch } from "./related_games.ts";
 import {
-  BOARD_THEMES,
-  DEFAULT_BOARD_THEME,
   generateBoardThemeCss,
+  getAllBoardThemes,
+  getAllPieceSets,
   getBoardTheme,
-} from "./themes/board_themes.ts";
-import { DEFAULT_PIECE_SET, PIECE_SETS } from "./themes/piece_sets.ts";
+} from "../chess-themes/plug_api.ts";
 
 function escapeHtml(str: string): string {
   return str
@@ -188,6 +187,11 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   const arrows: string[] = [];
   const highlights: Record<string, string> = {};
 
+  const { sets: PIECE_SETS, default: DEFAULT_PIECE_SET } =
+    await getAllPieceSets();
+  const { themes: BOARD_THEMES, default: DEFAULT_BOARD_THEME } =
+    await getAllBoardThemes();
+
   const globalPieceSet = await safeGetConfig<string>(
     "chess.pieceSet",
     DEFAULT_PIECE_SET,
@@ -241,11 +245,11 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   }
 
   const widgetId = `chess_fen_${Math.random().toString(36).substring(2, 9)}`;
-  const initialTheme = getBoardTheme(blockBoardTheme);
+  const initialTheme = await getBoardTheme(blockBoardTheme);
 
   const html = `
 <style>${CHESS_CSS}</style>
-<div class="chessnote-container" id="${widgetId}" style="${generateBoardThemeCss(initialTheme)}">
+<div class="chessnote-container" id="${widgetId}" style="${await generateBoardThemeCss(initialTheme)}">
   ${generateThemeModalHtml(widgetId)}
   <div class="chess-header">
     <div class="chess-title">${escapeHtml(title)}</div>
@@ -818,6 +822,11 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   const date = header["Date"] || "";
   const eco = header["ECO"] || "";
 
+  const { sets: PIECE_SETS, default: DEFAULT_PIECE_SET } =
+    await getAllPieceSets();
+  const { themes: BOARD_THEMES, default: DEFAULT_BOARD_THEME } =
+    await getAllBoardThemes();
+
   const globalPieceSet = await safeGetConfig<string>(
     "chess.pieceSet",
     DEFAULT_PIECE_SET,
@@ -838,7 +847,7 @@ export async function pgnWidget(bodyText: string, pageName: string) {
   // Cheap, chess.js-only move list for navigation — the real (engine-backed)
   // full review is fetched lazily via the chess.reviewGame syscall, only
   // when the user clicks "Game Review" (see the widget script below).
-  const moveList = buildMoveList(bodyText.trim());
+  const moveList = await buildMoveList(bodyText.trim());
 
   // Related games (Giai đoạn D, SQL hoá ở Phase 3): thuần rule-based (cùng
   // ECO, cùng người chơi) qua chessSql.queryRelatedGames — rẻ, không
@@ -858,7 +867,7 @@ export async function pgnWidget(bodyText: string, pageName: string) {
 
   const initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w KQkq - 0 1";
   const widgetId = `chess_pgn_${Math.random().toString(36).substring(2, 9)}`;
-  const initialTheme = getBoardTheme(blockBoardTheme);
+  const initialTheme = await getBoardTheme(blockBoardTheme);
 
   const relatedGamesHtml =
     relatedGames.length === 0
@@ -879,7 +888,7 @@ export async function pgnWidget(bodyText: string, pageName: string) {
 
   const html = `
 <style>${CHESS_CSS}</style>
-<div class="chessnote-container" id="${widgetId}" style="${generateBoardThemeCss(initialTheme)}">
+<div class="chessnote-container" id="${widgetId}" style="${await generateBoardThemeCss(initialTheme)}">
   ${generateThemeModalHtml(widgetId)}
   <div class="chess-header">
     <div class="chess-title">${escapeHtml(white)} vs ${escapeHtml(black)} (${escapeHtml(result)})</div>
@@ -1605,6 +1614,11 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
   let themes = "";
   let rating = "";
 
+  const { sets: PIECE_SETS, default: DEFAULT_PIECE_SET } =
+    await getAllPieceSets();
+  const { themes: BOARD_THEMES, default: DEFAULT_BOARD_THEME } =
+    await getAllBoardThemes();
+
   const globalPieceSet = await safeGetConfig<string>(
     "chess.pieceSet",
     DEFAULT_PIECE_SET,
@@ -1672,11 +1686,11 @@ export async function puzzleWidget(bodyText: string, _pageName: string) {
     .map((s) => s.trim())
     .filter(Boolean);
   const widgetId = `chess_puzzle_${Math.random().toString(36).substring(2, 9)}`;
-  const initialTheme = getBoardTheme(boardTheme);
+  const initialTheme = await getBoardTheme(boardTheme);
 
   const html = `
 <style>${CHESS_CSS}</style>
-<div class="chessnote-container" id="${widgetId}" style="${generateBoardThemeCss(initialTheme)}">
+<div class="chessnote-container" id="${widgetId}" style="${await generateBoardThemeCss(initialTheme)}">
   ${generateThemeModalHtml(widgetId)}
   <div class="chess-header">
     <div class="chess-title">Tactics Puzzle ${rating ? "• Rating: " + escapeHtml(rating) : ""}</div>

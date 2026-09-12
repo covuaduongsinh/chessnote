@@ -44,14 +44,22 @@ const WASM_PATH = "Library/Chess/arasan.wasm";
 const NNUE_PATH = "Library/Chess/arasanv8-20260906.nnue";
 const NNUE_FILENAME = "arasanv8-20260906.nnue";
 
+// Exported as a plain string (not just embedded in the class below) because
+// a syscall error crossing the plug Worker boundary only carries `.message`
+// across (see client/plugos/worker_runtime.ts's "invr" handler) — the
+// receiving side reconstructs a generic `Error`, losing the `EngineNotInstalledError`
+// class identity and even `.name`. Callers in other plugs (see
+// plug_api.ts's `isEngineNotInstalledError`) must match on this message
+// string instead of `instanceof`.
+export const ENGINE_NOT_INSTALLED_MESSAGE =
+  "Không tìm thấy file engine Arasan (arasan.wasm / arasanv8-20260906.nnue). " +
+  "Bản build ChessNote chuẩn luôn kèm sẵn 2 file này — nếu thiếu, có thể đây là " +
+  "bản build tùy chỉnh đã lược bỏ libraries/Library/Chess, hoặc Space này có file " +
+  "trùng tên đang che khuất chúng.";
+
 export class EngineNotInstalledError extends Error {
   constructor() {
-    super(
-      "Không tìm thấy file engine Arasan (arasan.wasm / arasanv8-20260906.nnue). " +
-        "Bản build ChessNote chuẩn luôn kèm sẵn 2 file này — nếu thiếu, có thể đây là " +
-        "bản build tùy chỉnh đã lược bỏ libraries/Library/Chess, hoặc Space này có file " +
-        "trùng tên đang che khuất chúng.",
-    );
+    super(ENGINE_NOT_INSTALLED_MESSAGE);
     this.name = "EngineNotInstalledError";
   }
 }

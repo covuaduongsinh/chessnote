@@ -1,0 +1,47 @@
+name: chess-themes
+functions:
+  chessThemesGetPieceSet:
+    path: ./piece_sets.ts:getPieceSet
+    syscall:
+      name: chess.themes.getPieceSet
+      description: Returns the SVG glyph map for a single piece set (falls back to Merida).
+      parameters:
+        - { name: name, type: string }
+      returns:
+        - { type: object }
+  chessThemesGetAllPieceSets:
+    path: ./piece_sets.ts:getAllPieceSets
+    syscall:
+      name: chess.themes.getAllPieceSets
+      description: >-
+        Full piece-set data (every set + metadata + default id) for embedding
+        into a widget's client-side theme picker.
+      returns:
+        - { type: object }
+  chessThemesGetBoardTheme:
+    path: ./board_themes.ts:getBoardTheme
+    syscall:
+      name: chess.themes.getBoardTheme
+      description: Returns a single board theme by id (falls back to Textbook).
+      parameters:
+        - { name: themeId, type: string }
+      returns:
+        - { type: object }
+  chessThemesGetAllBoardThemes:
+    path: ./board_themes.ts:getAllBoardThemes
+    syscall:
+      name: chess.themes.getAllBoardThemes
+      description: >-
+        Full board-theme data (every theme + default id) for embedding into a
+        widget's client-side theme picker.
+      returns:
+        - { type: object }
+  chessThemesGenerateBoardThemeCss:
+    path: ./board_themes.ts:generateBoardThemeCss
+    syscall:
+      name: chess.themes.generateBoardThemeCss
+      description: Generates the CSS custom-property block for a board theme.
+      parameters:
+        - { name: theme, type: object }
+      returns:
+        - { type: string }

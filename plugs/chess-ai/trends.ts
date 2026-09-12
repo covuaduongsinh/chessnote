@@ -15,13 +15,15 @@
 // cache cũ của đúng trang đó — không cần tự cài cơ chế phát hiện "PGN đã đổi".
 import { editor, index, space } from "@silverbulletmd/silverbullet/syscalls";
 import type { ObjectValue } from "@silverbulletmd/silverbullet/type/index";
-import { EngineNotInstalledError } from "../engine/arasan_engine.ts";
 import {
-  type GameReviewReport,
-  type MoveClassification,
+  isEngineNotInstalledError,
   reviewGame,
-} from "../engine/game_reviewer.ts";
-import type { ChessGameFields, ChessGameObject } from "../index.ts";
+} from "../chess-engine/plug_api.ts";
+import type {
+  GameReviewReport,
+  MoveClassification,
+} from "../chess-engine/game_reviewer.ts";
+import type { ChessGameFields, ChessGameObject } from "../chess/index.ts";
 import { aiAsk } from "./bridge.ts";
 import {
   ANTI_HALLUCINATION_RULE,
@@ -346,7 +348,7 @@ export async function commandAnalyzeTrends() {
         );
       }
     } catch (e) {
-      if (e instanceof EngineNotInstalledError) {
+      if (isEngineNotInstalledError(e)) {
         await editor.flashNotification(
           'Chưa cài engine Arasan (Library "Chess") — không thể phân tích ván nào. ' +
             "Xem hướng dẫn cài Library trong Configuration Manager.",

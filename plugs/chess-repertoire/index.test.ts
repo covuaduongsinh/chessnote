@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { parseMarkdown } from "../../../client/markdown_parser/parser.ts";
+import { parseMarkdown } from "../../client/markdown_parser/parser.ts";
 import { extractRepertoireLines } from "./index.ts";
 
 const repertoirePage = `

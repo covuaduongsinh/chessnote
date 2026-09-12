@@ -144,6 +144,18 @@ export function getBoardTheme(themeId?: string): BoardTheme {
   return BOARD_THEMES[normalized] || BOARD_THEMES[DEFAULT_BOARD_THEME];
 }
 
+/**
+ * Full board-theme data for embedding into a widget's client-side `<script>`
+ * (same reason as `getAllPieceSets` in `piece_sets.ts`) — exposed as
+ * `chess.themes.getAllBoardThemes`.
+ */
+export function getAllBoardThemes(): {
+  themes: Record<BoardThemeId, BoardTheme>;
+  default: BoardThemeId;
+} {
+  return { themes: BOARD_THEMES, default: DEFAULT_BOARD_THEME };
+}
+
 export function generateBoardThemeCss(theme: BoardTheme): string {
   return `
     --sq-light: ${theme.light};

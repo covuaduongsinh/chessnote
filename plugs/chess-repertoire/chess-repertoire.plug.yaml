@@ -1,0 +1,10 @@
+name: chess-repertoire
+functions:
+  indexRepertoireLines:
+    path: ./index.ts:indexRepertoireLines
+    events:
+      - page:index
+  chessRepertoireTrainCommand:
+    path: ./trainer.ts:commandRepertoireTrain
+    command:
+      name: "Chess: Ôn tập khai cuộc"

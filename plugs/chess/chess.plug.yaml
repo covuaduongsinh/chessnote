@@ -1,6 +1,4 @@
 name: chess
-requiredPermissions:
-  - fetch
 functions:
   indexChessGames:
     path: ./index.ts:indexChessGames
@@ -10,10 +8,6 @@ functions:
     path: ./index.ts:deleteChessGamesForPage
     events:
       - page:deleted
-  indexRepertoireLines:
-    path: ./repertoire/index.ts:indexRepertoireLines
-    events:
-      - page:index
   fenWidget:
     path: ./chess.ts:fenWidget
     codeWidget: fen
@@ -58,188 +52,59 @@ functions:
         - { name: san, type: string }
       returns:
         - { type: object }
-  chessEngineEval:
-    path: ./engine/arasan_engine.ts:evalPosition
+  chessRenderStaticBoardHtml:
+    path: ./board_renderer.ts:renderStaticBoardHtml
     syscall:
-      name: chess.engineEval
+      name: chess.renderStaticBoardHtml
       description: >-
-        Real UCI analysis of a FEN position using Arasan (NNUE, WebAssembly).
-        Throws if the optional "Chess Engine" Library isn't installed in this Space.
+        A fully static rendering of a FEN position (every square/piece baked
+        into the returned HTML, no iframe/interactivity) — used by
+        chess-pdf-export for print output.
       parameters:
         - { name: fen, type: string }
-        - { name: depth, type: number }
-      returns:
-        - { type: object }
-  chessReviewGame:
-    path: ./engine/game_reviewer.ts:reviewGame
-    syscall:
-      name: chess.reviewGame
-      description: >-
-        Full real-engine (Arasan) review of a PGN game: evaluates every position
-        with the real engine and classifies each move by centipawn loss. Slow
-        (roughly N+1 engine searches for N plies) — an on-demand batch job, not
-        something to call at render time.
-      parameters:
-        - { name: pgn, type: string }
-        - { name: depth, type: number }
-      returns:
-        - { type: object }
-  chessAiInit:
-    path: ./ai/bridge.ts:initAiConfig
-    events:
-      - editor:init
-  chessAiStatus:
-    path: ./ai/bridge.ts:aiStatus
-    syscall:
-      name: chess.ai.status
-      description: >-
-        Status of the personal AI subscription-bridge (ai-sidecar/): whether
-        the Claude Code CLI is logged in. Three-state: connected/unknown/stale
-        — a timeout or sidecar-not-running is never reported as "logged out".
-      returns:
-        - { type: object }
-  chessAiAuthStart:
-    path: ./ai/bridge.ts:aiAuthStart
-    syscall:
-      name: chess.ai.authStart
-      description: >-
-        Starts a Claude Code CLI login flow via the sidecar and returns the
-        login URL to open on the user's own machine.
-      returns:
-        - { type: object }
-  chessAiAuthCode:
-    path: ./ai/bridge.ts:aiAuthCode
-    syscall:
-      name: chess.ai.authCode
-      description: Submits the pasted login code to the pending CLI login session.
-      parameters:
-        - { name: code, type: string }
-      returns:
-        - { type: object }
-  chessAiAuthLogout:
-    path: ./ai/bridge.ts:aiAuthLogout
-    syscall:
-      name: chess.ai.authLogout
-      description: Logs the Claude Code CLI out via the sidecar.
-      returns:
-        - { type: object }
-  chessAiAuthCancel:
-    path: ./ai/bridge.ts:aiAuthCancel
-    syscall:
-      name: chess.ai.authCancel
-      description: Cancels a pending CLI login session.
-      returns:
-        - { type: object }
-  chessAiAsk:
-    path: ./ai/bridge.ts:aiAsk
-    syscall:
-      name: chess.ai.ask
-      description: >-
-        Plain-text-only AI generation (no tool calls) via the personal
-        subscription-bridge or a configured API key, per "chess.ai.mode".
-      parameters:
-        - { name: prompt, type: string }
-      returns:
-        - { type: object }
-  chessAiLoginCommand:
-    path: ./ai/bridge.ts:commandAiLogin
-    command:
-      name: "Chess: Đăng nhập AI"
-  chessAiLogoutCommand:
-    path: ./ai/bridge.ts:commandAiLogout
-    command:
-      name: "Chess: Đăng xuất AI"
-  chessAiExplainMove:
-    path: ./ai/coach.ts:explainMove
-    syscall:
-      name: chess.ai.explainMove
-      description: >-
-        Giải thích một nước đi bằng AI, chỉ dựa trên số liệu engine thật đã tính
-        sẵn (classification/cpl/bestMoveSan/eval trước-sau) để chống hallucination.
-      parameters:
-        - { name: input, type: object }
-      returns:
-        - { type: object }
-  chessAiAnnotateGame:
-    path: ./ai/coach.ts:annotateGame
-    syscall:
-      name: chess.ai.annotateGame
-      description: >-
-        Bình luận toàn ván bằng AI (1 lần gọi duy nhất), dựa trên độ chính xác và
-        danh sách bước ngoặt (mistake/blunder/brilliant/great) đã cắt gọn từ
-        chess.reviewGame — không dump toàn bộ nước đi để tránh phình chi phí.
-      parameters:
-        - { name: report, type: object }
-        - { name: headers, type: object }
-      returns:
-        - { type: object }
-  chessAiStatusCommand:
-    path: ./ai/bridge.ts:commandAiStatus
-    command:
-      name: "Chess: Trạng thái AI"
-  chessAnalyzeTrendsCommand:
-    path: ./ai/trends.ts:commandAnalyzeTrends
-    command:
-      name: "Chess: Phân tích xu hướng"
-  chessOpeningStatsCommand:
-    path: ./ai/opening_stats.ts:commandOpeningStats
-    command:
-      name: "Chess: Thống kê khai cuộc"
-  chessRepertoireTrainCommand:
-    path: ./repertoire/trainer.ts:commandRepertoireTrain
-    command:
-      name: "Chess: Ôn tập khai cuộc"
-  chessComputeEmbeddingsCommand:
-    path: ./ai/semantic_index.ts:commandComputeEmbeddings
-    command:
-      name: "Chess: Tính embedding ngữ nghĩa"
-  chessDebugDumpSqlCommand:
-    path: ./ai/debug_dump.ts:commandDebugDumpSql
-    command:
-      name: "Chess: Kiểm tra dữ liệu SQLite (debug)"
-  chessAiSuggestTags:
-    path: ./ai/tagging.ts:suggestTags
-    syscall:
-      name: chess.ai.suggestTags
-      description: >-
-        Gợi ý tối đa 4 tag + 1 câu tóm tắt cho một ván, dựa trên metadata và vài
-        nước mở đầu (không toàn bộ PGN). Trả lời sai định dạng bị coi là lỗi,
-        không tự đoán mò.
-      parameters:
-        - { name: input, type: object }
-      returns:
-        - { type: object }
-  chessAskAiCommand:
-    path: ./ai/qa.ts:commandAskAi
-    command:
-      name: "Chess: Hỏi AI"
-  chessRenderPageForPdf:
-    path: ./pdf_export.ts:renderPageForPdf
-    syscall:
-      name: chess.renderPageForPdf
-      description: >-
-        Dựng lại toàn bộ nội dung trang thành 1 HTML tĩnh sẵn sàng để in PDF:
-        thay mỗi khối fen/pgn/puzzle bằng ảnh bàn cờ tĩnh (không cần iframe),
-        phần còn lại render bằng markdown.markdownToHtml. boardSize (px, mặc
-        định 400, kẹp trong khoảng 150-700) chỉnh độ rộng mỗi bàn cờ.
-      parameters:
-        - { name: text, type: string }
-        - { name: boardSize, type: number }
+        - { name: opts, type: object }
       returns:
         - { type: string }
-  chessApplyTagSuggestion:
-    path: ./ai/tagging.ts:applyTagSuggestion
+  chessGetCss:
+    path: ./board_renderer.ts:getChessCss
     syscall:
-      name: chess.applyTagSuggestion
+      name: chess.getCss
+      description: The shared CSS for chessnote-container/chess-board markup.
+      returns:
+        - { type: string }
+  chessExtractChessGames:
+    path: ./index.ts:extractChessGames
+    syscall:
+      name: chess.extractChessGames
       description: >-
-        Ghi tag gợi ý (gộp, không xoá tag cũ) + tóm tắt (frontmatter `chessSummary`)
-        vào ghi chú, đồng thời lưu bản có cấu trúc (kèm model đã dùng) vào
-        SQLite qua chessSql.upsertAiAnnotation. Chỉ gọi khi người dùng đã bấm
-        "Áp dụng" trên gợi ý AI.
+        Extracts one chess-game object per ```pgn``` code block found on a
+        page's parse tree — the same header-parsing logic the page:index
+        indexer itself uses.
       parameters:
         - { name: pageName, type: string }
-        - { name: tags, type: array }
-        - { name: summary, type: string }
-        - { name: modelVersion, type: string }
+        - { name: tree, type: object }
       returns:
-        - { type: object }
+        - { type: array }
+  chessTextExtractKeywords:
+    path: ./text_normalize.ts:extractKeywords
+    syscall:
+      name: chess.textExtractKeywords
+      description: >-
+        Normalizes (strip diacritics, lowercase) and tokenizes a Vietnamese
+        question into search keywords, dropping common stopwords — used to
+        keep search-side tokenization identical to the FTS5 index-side one.
+      parameters:
+        - { name: question, type: string }
+      returns:
+        - { type: array }
+  chessIsRepertoirePage:
+    path: ./index.ts:isRepertoirePage
+    syscall:
+      name: chess.isRepertoirePage
+      description: >-
+        True if a page's frontmatter marks it as an opening-repertoire page
+        (`tags: repertoire`) rather than a real played game.
+      parameters:
+        - { name: frontmatter, type: object }
+      returns:
+        - { type: boolean }

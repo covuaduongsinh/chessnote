@@ -8,6 +8,11 @@ export const builtinPlugNames = [
   "image-viewer",
   "configuration-manager",
   "object-graph",
+  "chess-themes",
+  "chess-engine",
+  "chess-pdf-export",
+  "chess-repertoire",
+  "chess-ai",
   "chess",
 ];
 

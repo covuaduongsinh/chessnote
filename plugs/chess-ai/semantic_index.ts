@@ -15,8 +15,8 @@ import {
   space,
   system,
 } from "@silverbulletmd/silverbullet/syscalls";
-import { extractFrontMatter } from "../../index/frontmatter.ts";
-import type { ChessGameFields, ChessGameObject } from "../index.ts";
+import { extractFrontMatter } from "../index/frontmatter.ts";
+import type { ChessGameFields, ChessGameObject } from "../chess/index.ts";
 
 /** Đọc `chessSummary` (Giai đoạn C) trực tiếp từ trang — chấp nhận được ở đây (lệnh chạy theo lô, không phải đường hỏi-đáp nóng mà Phase 2 đã tối ưu tránh việc này). */
 async function readSummary(page: string): Promise<string> {

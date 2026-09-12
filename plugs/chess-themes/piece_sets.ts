@@ -77,3 +77,17 @@ export function getPieceSet(name?: string): Record<string, string> {
   const normalized = name.toLowerCase().trim() as PieceSetId;
   return PIECE_SETS[normalized] || PIECE_SETS[DEFAULT_PIECE_SET];
 }
+
+/**
+ * Full piece-set data for embedding into a widget's client-side `<script>`
+ * (the interactive theme picker running in the iframe needs every set, not
+ * just the currently-selected one, so it can switch without another
+ * syscall round-trip) — exposed as `chess.themes.getAllPieceSets`.
+ */
+export function getAllPieceSets(): {
+  sets: Record<PieceSetId, Record<string, string>>;
+  meta: Record<PieceSetId, PieceSetMeta>;
+  default: PieceSetId;
+} {
+  return { sets: PIECE_SETS, meta: PIECE_SETS_META, default: DEFAULT_PIECE_SET };
+}

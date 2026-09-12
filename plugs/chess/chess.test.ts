@@ -1,12 +1,42 @@
-import { describe, expect, test } from "vitest";
-import {
-  applyMove,
-  applySan,
-  fenWidget,
-  legalMoves,
-  pgnWidget,
-  puzzleWidget,
-} from "./chess.ts";
+import { describe, expect, test, vi } from "vitest";
+
+// chess.ts now fetches piece-set/board-theme data from the chess-themes plug
+// via a syscall (see plugs/chess-themes/plug_api.ts) instead of importing it
+// directly — mock that boundary with the real theme data (just wrapped in a
+// resolved Promise) so these tests exercise real theme content without
+// needing a live syscall dispatcher.
+vi.mock("../chess-themes/plug_api.ts", async () => {
+  const boardThemes = await import("../chess-themes/board_themes.ts");
+  const pieceSets = await import("../chess-themes/piece_sets.ts");
+  return {
+    getPieceSet: (name?: string) =>
+      Promise.resolve(pieceSets.getPieceSet(name)),
+    getAllPieceSets: () => Promise.resolve(pieceSets.getAllPieceSets()),
+    getBoardTheme: (id?: string) =>
+      Promise.resolve(boardThemes.getBoardTheme(id)),
+    getAllBoardThemes: () => Promise.resolve(boardThemes.getAllBoardThemes()),
+    generateBoardThemeCss: (theme: unknown) =>
+      Promise.resolve(
+        boardThemes.generateBoardThemeCss(
+          theme as Parameters<typeof boardThemes.generateBoardThemeCss>[0],
+        ),
+      ),
+  };
+});
+
+// pgnWidget's cheap move-list navigation now goes through chess-engine's
+// plug_api (chess.engine.buildMoveList syscall) instead of a direct import —
+// mock it with the real, engine-free buildMoveList implementation.
+vi.mock("../chess-engine/plug_api.ts", async () => {
+  const gameReviewer = await import("../chess-engine/game_reviewer.ts");
+  return {
+    buildMoveList: (pgn: string) =>
+      Promise.resolve(gameReviewer.buildMoveList(pgn)),
+  };
+});
+
+const { applyMove, applySan, fenWidget, legalMoves, pgnWidget, puzzleWidget } =
+  await import("./chess.ts");
 
 describe("Chess Plug Unit Tests", () => {
   test("fenWidget generates valid HTML and SVG board for starting position", async () => {

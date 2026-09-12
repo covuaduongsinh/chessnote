@@ -1,6 +1,9 @@
 import { Chess } from "chess.js";
-import { generateBoardThemeCss, getBoardTheme } from "./themes/board_themes.ts";
-import { DEFAULT_PIECE_SET, getPieceSet } from "./themes/piece_sets.ts";
+import {
+  generateBoardThemeCss,
+  getBoardTheme,
+  getPieceSet,
+} from "../chess-themes/plug_api.ts";
 
 function escapeHtmlForBoard(str: string): string {
   return str
@@ -25,7 +28,7 @@ function escapeHtmlForBoard(str: string): string {
  * whatever fixed-width box the print layout needs (see
  * `.chessnote-static-board-wrapper` in `pdf_export.ts`).
  */
-export function renderStaticBoardHtml(
+export async function renderStaticBoardHtml(
   fen: string,
   opts: {
     orientation?: "white" | "black";
@@ -34,10 +37,10 @@ export function renderStaticBoardHtml(
     pieceSet?: string;
     boardTheme?: string;
   } = {},
-): string {
+): Promise<string> {
   const orientation = opts.orientation === "black" ? "black" : "white";
-  const pieceSvgs = getPieceSet(opts.pieceSet);
-  const theme = getBoardTheme(opts.boardTheme);
+  const pieceSvgs = await getPieceSet(opts.pieceSet);
+  const theme = await getBoardTheme(opts.boardTheme);
 
   let boardRows: ReturnType<Chess["board"]>;
   try {
@@ -88,14 +91,17 @@ export function renderStaticBoardHtml(
   return `
 <div class="chessnote-static-board">
   ${titleHtml}
-  <div class="chess-board" style="${generateBoardThemeCss(theme)}">${squares}</div>
+  <div class="chess-board" style="${await generateBoardThemeCss(theme)}">${squares}</div>
   ${fenFooterHtml}
 </div>`;
 }
 
-// Default SVG Chess Pieces (Merida textbook standard - backwards compatible export)
-export const PIECE_SVGS: Record<string, string> =
-  getPieceSet(DEFAULT_PIECE_SET);
+/** Thin function wrapper so other plugs (chess-pdf-export) can reach the
+ * constant below via a syscall — a manifest `path:` must point to a
+ * function, not a plain export. */
+export function getChessCss(): string {
+  return CHESS_CSS;
+}
 
 export const CHESS_CSS = `
 :root {

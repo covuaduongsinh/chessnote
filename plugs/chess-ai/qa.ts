@@ -28,7 +28,7 @@ import {
 } from "@silverbulletmd/silverbullet/syscalls";
 import { aiAsk } from "./bridge.ts";
 import { ANTI_HALLUCINATION_RULE } from "./coach.ts";
-import { extractKeywords } from "./text_normalize.ts";
+import { extractKeywords } from "../chess/plug_api.ts";
 
 const MAX_CONTEXT_GAMES = 15;
 
@@ -44,7 +44,7 @@ async function retrieveMatches(
     });
     return { matches, method: "semantic" };
   }
-  const keywords = extractKeywords(question);
+  const keywords = await extractKeywords(question);
   const matches = await chessSql.searchGames({
     keywords,
     limit: MAX_CONTEXT_GAMES,

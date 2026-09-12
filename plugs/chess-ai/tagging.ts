@@ -14,9 +14,9 @@ import {
   space,
   system,
 } from "@silverbulletmd/silverbullet/syscalls";
-import type { YamlPatch } from "../../../plug-api/lib/yaml.ts";
-import { extractFrontMatter } from "../../index/frontmatter.ts";
-import { extractChessGames } from "../index.ts";
+import type { YamlPatch } from "../../plug-api/lib/yaml.ts";
+import { extractFrontMatter } from "../index/frontmatter.ts";
+import { extractChessGames } from "../chess/plug_api.ts";
 import { aiAsk } from "./bridge.ts";
 
 export interface TagSuggestionInput {
@@ -133,7 +133,7 @@ export async function applyTagSuggestion(
     );
     await space.writePage(pageName, patchedText);
 
-    const games = extractChessGames(pageName, tree);
+    const games = await extractChessGames(pageName, tree);
     for (const g of games) {
       await chessSql.upsertAiAnnotation({
         ref: g.ref,

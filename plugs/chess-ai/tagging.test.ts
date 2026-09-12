@@ -40,9 +40,24 @@ vi.mock("@silverbulletmd/silverbullet/syscalls", () => ({
   },
   index: {},
 }));
-vi.mock("../../index/frontmatter.ts", () => ({
+vi.mock("../index/frontmatter.ts", () => ({
   extractFrontMatter: vi.fn(() => ({ tags: [] })),
 }));
+// extractChessGames now crosses into chess-core via a syscall (chess/plug_api.ts)
+// instead of a direct import — mock that boundary with the real,
+// syscall-free implementation (pure chess.js/tree-walking logic).
+vi.mock("../chess/plug_api.ts", async () => {
+  const chessIndex = await import("../chess/index.ts");
+  return {
+    extractChessGames: (pageName: string, tree: unknown) =>
+      Promise.resolve(
+        chessIndex.extractChessGames(
+          pageName,
+          tree as Parameters<typeof chessIndex.extractChessGames>[1],
+        ),
+      ),
+  };
+});
 // extractChessGames() (called by applyTagSuggestion) parses the page tree
 // with chess.js for real ```pgn``` blocks — the mocked tree here has none,
 // so it always returns []. That's fine: these tests only assert what
@@ -57,7 +72,7 @@ const {
   suggestTags,
   applyTagSuggestion,
 } = await import("./tagging.ts");
-const { extractFrontMatter } = await import("../../index/frontmatter.ts");
+const { extractFrontMatter } = await import("../index/frontmatter.ts");
 
 function input(
   overrides: Partial<Parameters<typeof buildTagSuggestionPrompt>[0]> = {},
