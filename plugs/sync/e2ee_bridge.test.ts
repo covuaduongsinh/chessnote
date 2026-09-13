@@ -36,8 +36,8 @@ const dec = (b: Uint8Array) => new TextDecoder().decode(b);
 class FakeProvider implements SyncProvider {
   readonly name = "Fake";
   stored = new Map<string, Uint8Array>();
-  async listEntries(): Promise<RemoteFileEntry[]> {
-    return [];
+  async listEntries() {
+    return { entries: [] as RemoteFileEntry[], cursor: undefined, full: true as const };
   }
   async download(_folder: string, path: string) {
     return { data: this.stored.get(path)!, rev: "r", serverModified: "s" };

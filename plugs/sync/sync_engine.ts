@@ -66,6 +66,7 @@ function computeSyncScope(
   remoteEntries: RemoteFileEntry[],
   state: SyncState,
   stateFilePath: string,
+  cursorFilePath: string,
 ) {
   // `space.listFiles()` returns the Fallthrough-merged listing (real Space
   // files + the server's read-only baked-in Library/Repositories content,
@@ -80,7 +81,13 @@ function computeSyncScope(
   );
   const localMap = new Map(
     localFiles
-      .filter((f) => f.name !== stateFilePath && !excluded.has(f.name) && !isBakedIn(f.name))
+      .filter(
+        (f) =>
+          f.name !== stateFilePath &&
+          f.name !== cursorFilePath &&
+          !excluded.has(f.name) &&
+          !isBakedIn(f.name),
+      )
       .map((f) => [f.name, f]),
   );
   const remoteMap = new Map<string, RemoteFileEntry>();
@@ -125,6 +132,95 @@ async function saveState(
   state: SyncState,
 ): Promise<void> {
   await spaceOps.writeFile(stateFilePath, new TextEncoder().encode(JSON.stringify(state)));
+}
+
+/**
+ * File riêng cho cursor + bản sao (snapshot) danh sách remote (Giai đoạn 2.1,
+ * 2026-09-13) -- CỐ Ý tách khỏi `stateFilePathFor` (sync-state.json): cursor
+ * là dữ liệu CỦA RIÊNG bước liệt kê remote (không liên quan gì tới
+ * localMtime/remoteRev từng path), gộp chung vào state sẽ buộc phải đổi
+ * format file đang chạy thật trên production của nhiều user -- rủi ro không
+ * cần thiết. 1 file riêng, không ai từng đọc, an toàn thêm mới hoàn toàn.
+ */
+function cursorFilePathFor(provider: SyncProvider): string {
+  if (provider.name === "Dropbox") return "_dropbox/sync-cursor.json";
+  const slug = provider.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return `_sync/${slug}-cursor.json`;
+}
+
+interface RemoteCacheEntry {
+  rev: string;
+  serverModified: string;
+}
+
+/** Bản sao (snapshot) toàn bộ remote hiện biết + cursor để lần sau chỉ hỏi
+ * phần thay đổi (delta) thay vì liệt kê lại từ đầu. */
+interface RemoteCache {
+  cursor?: string;
+  entries: Record<string, RemoteCacheEntry>;
+}
+
+async function loadRemoteCache(spaceOps: SpaceOps, cursorFilePath: string): Promise<RemoteCache> {
+  try {
+    const data = await spaceOps.readFile(cursorFilePath);
+    const parsed = JSON.parse(new TextDecoder().decode(data));
+    if (parsed && typeof parsed === "object" && parsed.entries) return parsed as RemoteCache;
+    return { entries: {} };
+  } catch {
+    return { entries: {} };
+  }
+}
+
+async function saveRemoteCache(
+  spaceOps: SpaceOps,
+  cursorFilePath: string,
+  cache: RemoteCache,
+): Promise<void> {
+  await spaceOps.writeFile(cursorFilePath, new TextEncoder().encode(JSON.stringify(cache)));
+}
+
+/**
+ * Lấy danh sách remote ĐẦY ĐỦ để đưa vào `computeSyncScope`, nhưng chỉ thực
+ * sự hỏi provider phần THAY ĐỔI (delta) kể từ cursor lần trước nếu provider
+ * hỗ trợ (Dropbox) -- provider không hỗ trợ (WebDAV) luôn trả `full: true,
+ * cursor: undefined`, hàm này khi đó chỉ đơn giản dùng thẳng kết quả, không
+ * cache gì thêm (không có cursor để tái sử dụng ở lần sau).
+ *
+ * QUAN TRỌNG: khi `result.full === false` (chỉ nhận delta), các path KHÔNG có
+ * trong `result.entries` không có nghĩa "đã biến mất trên remote" -- nghĩa là
+ * "không đổi kể từ cursor trước", nên phải MERGE delta vào bản cache cũ (add
+ * đè, xoá nếu deleted) để tái tạo đúng trạng thái remote đầy đủ, chứ không
+ * được coi thẳng `result.entries` là toàn bộ remote (sẽ khiến mọi file không
+ * đổi bị hiểu nhầm là "đã bị xoá trên remote" -- lỗi mất dữ liệu nghiêm trọng).
+ */
+async function resolveRemoteEntries(
+  provider: SyncProvider,
+  folder: string,
+  spaceOps: SpaceOps,
+  cursorFilePath: string,
+): Promise<RemoteFileEntry[]> {
+  const cache = await loadRemoteCache(spaceOps, cursorFilePath);
+  const result = await provider.listEntries(folder, cache.cursor);
+
+  const merged: Record<string, RemoteCacheEntry> = result.full ? {} : { ...cache.entries };
+  for (const e of result.entries) {
+    if (e.deleted) {
+      delete merged[e.path];
+    } else {
+      merged[e.path] = { rev: e.rev, serverModified: e.serverModified };
+    }
+  }
+
+  if (result.cursor !== undefined) {
+    await saveRemoteCache(spaceOps, cursorFilePath, { cursor: result.cursor, entries: merged });
+  }
+
+  return Object.entries(merged).map(([path, v]) => ({
+    path,
+    rev: v.rev,
+    serverModified: v.serverModified,
+    deleted: false,
+  }));
 }
 
 /** Đường dẫn file xung đột: chèn `.conflict-<thời điểm UTC>` trước phần mở rộng
@@ -218,9 +314,13 @@ export async function diagnoseSync(
   spaceOps: SpaceOps,
 ): Promise<SyncDiagnosis[]> {
   const stateFilePath = stateFilePathFor(provider);
+  const cursorFilePath = cursorFilePathFor(provider);
   const state = await loadState(spaceOps, stateFilePath);
 
-  const [localFiles, remoteEntries] = await Promise.all([
+  // Dry-run: luôn liệt kê ĐẦY ĐỦ (không truyền cursor), không đọc/ghi
+  // RemoteCache -- giữ đúng cam kết "KHÔNG ghi bất cứ gì" của hàm này, và
+  // tránh làm lệch cursor đã lưu cho lần `performSync` thật kế tiếp.
+  const [localFiles, { entries: remoteEntries }] = await Promise.all([
     spaceOps.listFiles(),
     provider.listEntries(folder),
   ]);
@@ -230,6 +330,7 @@ export async function diagnoseSync(
     remoteEntries,
     state,
     stateFilePath,
+    cursorFilePath,
   );
 
   const out: SyncDiagnosis[] = [];
@@ -252,17 +353,31 @@ export async function diagnoseSync(
   return out;
 }
 
+export interface PerformSyncOptions {
+  /** Số path xử lý xong tối đa trước khi bắt buộc checkpoint (mặc định 20). */
+  checkpointBatchSize?: number;
+  /** Thời gian tối đa (ms) giữa 2 lần checkpoint (mặc định 2000). */
+  checkpointIntervalMs?: number;
+}
+
+const DEFAULT_CHECKPOINT_BATCH_SIZE = 20;
+const DEFAULT_CHECKPOINT_INTERVAL_MS = 2_000;
+
 export async function performSync(
   provider: SyncProvider,
   folder: string,
   spaceOps: SpaceOps,
+  opts: PerformSyncOptions = {},
 ): Promise<SyncReport> {
+  const checkpointBatchSize = opts.checkpointBatchSize ?? DEFAULT_CHECKPOINT_BATCH_SIZE;
+  const checkpointIntervalMs = opts.checkpointIntervalMs ?? DEFAULT_CHECKPOINT_INTERVAL_MS;
   const stateFilePath = stateFilePathFor(provider);
+  const cursorFilePath = cursorFilePathFor(provider);
   const state = await loadState(spaceOps, stateFilePath);
 
   const [localFiles, remoteEntries] = await Promise.all([
     spaceOps.listFiles(),
-    provider.listEntries(folder),
+    resolveRemoteEntries(provider, folder, spaceOps, cursorFilePath),
   ]);
 
   const { excluded, localMap, remoteMap, allPaths } = computeSyncScope(
@@ -270,6 +385,7 @@ export async function performSync(
     remoteEntries,
     state,
     stateFilePath,
+    cursorFilePath,
   );
 
   const report: SyncReport = {
@@ -301,6 +417,30 @@ export async function performSync(
     if (excluded.has(p) || isBakedIn(p)) delete nextState[p];
   }
 
+  // Checkpoint theo lô (Giai đoạn 1.1, 2026-09-13): giữ nguyên mục đích của
+  // checkpoint-mỗi-path ở trên (không mất tiến độ nếu bị ngắt giữa chừng) NHƯNG
+  // gộp thành 1 lần ghi mỗi `checkpointBatchSize` path HOẶC mỗi
+  // `checkpointIntervalMs` (điều kiện nào tới trước) thay vì ghi toàn bộ
+  // SyncState sau MỖI path — N file thay đổi trước đây = N lần serialize+ghi
+  // toàn bộ state (O(n²) I/O+CPU), là nguyên nhân chính gây "chậm/treo khi
+  // đồng bộ lần đầu/Space nhiều file" (xem docs/plans). Đánh đổi: nếu bị ngắt
+  // giữa chừng, mất tối đa tiến độ của 1 lô (mặc định ~20 path) thay vì 0 -- vô
+  // hại, vì dữ liệu thật không mất (đã nằm trên remote/local), chỉ khiến lần
+  // sync kế xử lý lại đúng các path đó.
+  let pendingSinceCheckpoint = 0;
+  let lastCheckpointAt = Date.now();
+  const checkpoint = async () => {
+    pendingSinceCheckpoint++;
+    if (
+      pendingSinceCheckpoint >= checkpointBatchSize ||
+      Date.now() - lastCheckpointAt >= checkpointIntervalMs
+    ) {
+      await saveState(spaceOps, stateFilePath, nextState);
+      pendingSinceCheckpoint = 0;
+      lastCheckpointAt = Date.now();
+    }
+  };
+
   for (const path of allPaths) {
     try {
       const local = localMap.get(path);
@@ -314,7 +454,7 @@ export async function performSync(
         // Xoá + lưu NGAY (không chờ hết vòng lặp) — nếu bị ngắt ở path kế
         // tiếp, việc "đã quên" path này không bị mất.
         delete nextState[path];
-        await saveState(spaceOps, stateFilePath, nextState);
+        await checkpoint();
         continue; // đã biến mất cả hai bên, không giữ trong state nữa
       }
 
@@ -343,7 +483,7 @@ export async function performSync(
           report.uploaded.push(path);
           nextState[path] = { localMtime: local.lastModified, remoteRev: result.rev };
         }
-        await saveState(spaceOps, stateFilePath, nextState);
+        await checkpoint();
         continue;
       }
 
@@ -366,7 +506,7 @@ export async function performSync(
           report.downloaded.push(path);
           nextState[path] = { localMtime: meta.lastModified, remoteRev: dl.rev };
         }
-        await saveState(spaceOps, stateFilePath, nextState);
+        await checkpoint();
         continue;
       }
 
@@ -391,7 +531,7 @@ export async function performSync(
             rev: remote.rev,
           });
           nextState[path] = { localMtime: local.lastModified, remoteRev: result.rev };
-          await saveState(spaceOps, stateFilePath, nextState);
+          await checkpoint();
           continue;
         }
         if (localChanged) {
@@ -402,7 +542,7 @@ export async function performSync(
           });
           report.uploaded.push(path);
           nextState[path] = { localMtime: local.lastModified, remoteRev: result.rev };
-          await saveState(spaceOps, stateFilePath, nextState);
+          await checkpoint();
           continue;
         }
         if (remoteChanged) {
@@ -410,7 +550,7 @@ export async function performSync(
           const meta = await spaceOps.writeFile(path, dl.data);
           report.downloaded.push(path);
           nextState[path] = { localMtime: meta.lastModified, remoteRev: dl.rev };
-          await saveState(spaceOps, stateFilePath, nextState);
+          await checkpoint();
           continue;
         }
         // Không đổi bên nào — giữ nguyên state.

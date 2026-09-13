@@ -374,33 +374,29 @@ export interface DropboxEntry {
   deleted: boolean;
 }
 
-/** Liệt kê đệ quy toàn bộ file trong `folder`, tự phân trang qua `list_folder/continue`. */
-export async function listFolderRecursive(
+export interface ListFolderResult {
+  entries: DropboxEntry[];
+  /** Cursor "hiện tại" sau khi liệt kê xong -- dùng cho lần gọi sau để chỉ
+   * nhận delta. undefined nếu thư mục chưa tồn tại trên Dropbox (409). */
+  cursor?: string;
+  /** true nếu đây là liệt kê ĐẦY ĐỦ (list_folder, hoặc fallback do cursor cũ
+   * không còn hợp lệ); false nếu chỉ là phần thay đổi (list_folder/continue
+   * từ 1 cursor đã lưu trước đó). */
+  full: boolean;
+}
+
+/** Rút toàn bộ trang (`has_more`) bắt đầu từ 1 Response `list_folder`/
+ * `list_folder/continue` đã nhận được, gộp lại thành 1 danh sách + cursor
+ * cuối cùng (cursor này luôn có trên mọi trang, kể cả trang cuối — dùng để
+ * tiếp tục delta ở lần liệt kê sau). */
+async function drainPages(
   deps: DropboxClientDeps,
-  folder: string,
-): Promise<DropboxEntry[]> {
+  initialRes: Response,
+  prefix: string,
+): Promise<{ entries: DropboxEntry[]; cursor?: string }> {
   const entries: DropboxEntry[] = [];
-  const { apiPath, prefix } = normalizeDropboxFolder(folder);
-
-  let res = await apiFetch(deps, `${API_ROOT}/files/list_folder`, {
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      path: apiPath,
-      recursive: true,
-      include_deleted: true,
-      include_media_info: false,
-    }),
-  });
-  if (res.status === 409) {
-    // Thư mục chưa tồn tại trên Dropbox (lần đồng bộ đầu tiên) — coi như rỗng.
-    return [];
-  }
-  if (!res.ok) {
-    throw new Error(
-      `Liệt kê thư mục Dropbox thất bại: HTTP ${res.status} — ${await describeError(res)}`,
-    );
-  }
-
+  let res = initialRes;
+  let cursor: string | undefined;
   for (;;) {
     const json = await res.json();
     for (const e of json.entries || []) {
@@ -414,6 +410,7 @@ export async function listFolderRecursive(
         deleted: e[".tag"] === "deleted",
       });
     }
+    cursor = json.cursor ?? cursor;
     if (!json.has_more) break;
     res = await apiFetch(deps, `${API_ROOT}/files/list_folder/continue`, {
       headers: { "content-type": "application/json" },
@@ -425,5 +422,81 @@ export async function listFolderRecursive(
       );
     }
   }
-  return entries;
+  return { entries, cursor };
+}
+
+/** Đọc lỗi của `list_folder/continue` — phân biệt "cursor hết hạn/không còn
+ * hợp lệ" (`reset`, cần fallback về liệt kê đầy đủ) với lỗi thật khác. Đọc
+ * body đúng 1 lần (Response chỉ đọc được 1 lần) nên trả kèm cả message để
+ * caller không cần đọc lại. */
+async function describeContinueError(res: Response): Promise<{ isReset: boolean; message: string }> {
+  const text = await res.text();
+  try {
+    const json = JSON.parse(text);
+    const isReset =
+      json?.error?.[".tag"] === "reset" ||
+      (typeof json.error_summary === "string" && json.error_summary.startsWith("reset/"));
+    return { isReset, message: json.error_summary || json.error_description || text.slice(0, 300) };
+  } catch {
+    return { isReset: false, message: text.slice(0, 300) };
+  }
+}
+
+/**
+ * Liệt kê file trong `folder`. Nếu có `priorCursor` (từ lần gọi trước, xem
+ * `sync_engine.ts:resolveRemoteEntries`), gọi thẳng `list_folder/continue` để
+ * chỉ nhận phần THAY ĐỔI (delta) — giảm mạnh số API call so với liệt kê lại
+ * toàn bộ cây mỗi lần sync (nguyên nhân chính gây lỗi 429/chậm khi Space
+ * nhiều file, xem docs/plans). Nếu cursor không còn hợp lệ (Dropbox trả
+ * `reset`), tự động rơi về liệt kê đầy đủ như trước — KHÔNG ném lỗi ra ngoài.
+ */
+export async function listFolder(
+  deps: DropboxClientDeps,
+  folder: string,
+  priorCursor?: string,
+): Promise<ListFolderResult> {
+  const { apiPath, prefix } = normalizeDropboxFolder(folder);
+
+  if (priorCursor) {
+    const continueRes = await apiFetch(deps, `${API_ROOT}/files/list_folder/continue`, {
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cursor: priorCursor }),
+    });
+    if (continueRes.ok) {
+      const { entries, cursor } = await drainPages(deps, continueRes, prefix);
+      return { entries, cursor, full: false };
+    }
+    if (continueRes.status === 409) {
+      const { isReset, message } = await describeContinueError(continueRes);
+      if (!isReset) {
+        throw new Error(`Phân trang danh sách Dropbox thất bại: HTTP 409 — ${message}`);
+      }
+      // cursor hết hạn/không còn hợp lệ -- rơi xuống liệt kê đầy đủ bên dưới.
+    } else {
+      throw new Error(
+        `Phân trang danh sách Dropbox thất bại: HTTP ${continueRes.status} — ${await describeError(continueRes)}`,
+      );
+    }
+  }
+
+  const res = await apiFetch(deps, `${API_ROOT}/files/list_folder`, {
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      path: apiPath,
+      recursive: true,
+      include_deleted: true,
+      include_media_info: false,
+    }),
+  });
+  if (res.status === 409) {
+    // Thư mục chưa tồn tại trên Dropbox (lần đồng bộ đầu tiên) — coi như rỗng.
+    return { entries: [], cursor: undefined, full: true };
+  }
+  if (!res.ok) {
+    throw new Error(
+      `Liệt kê thư mục Dropbox thất bại: HTTP ${res.status} — ${await describeError(res)}`,
+    );
+  }
+  const { entries, cursor } = await drainPages(deps, res, prefix);
+  return { entries, cursor, full: true };
 }

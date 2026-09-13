@@ -6,7 +6,7 @@ vi.mock("./dropbox_sync.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./dropbox_sync.ts")>();
   return {
     ...actual,
-    listFolderRecursive: vi.fn(),
+    listFolder: vi.fn(),
     uploadFile: vi.fn(),
     downloadFile: vi.fn(),
     deleteFile: vi.fn(),
@@ -24,13 +24,13 @@ beforeEach(() => {
 });
 
 describe("DropboxSyncProvider", () => {
-  test("listEntries forwards the folder as-is to listFolderRecursive", async () => {
-    vi.mocked(dropboxSyncMock.listFolderRecursive).mockResolvedValue([]);
+  test("listEntries forwards the folder and priorCursor as-is to listFolder", async () => {
+    vi.mocked(dropboxSyncMock.listFolder).mockResolvedValue({ entries: [], cursor: undefined, full: true });
     const provider = new DropboxSyncProvider(deps);
 
-    await provider.listEntries("ChessNote");
+    await provider.listEntries("ChessNote", "cursor-abc");
 
-    expect(dropboxSyncMock.listFolderRecursive).toHaveBeenCalledWith(deps, "ChessNote");
+    expect(dropboxSyncMock.listFolder).toHaveBeenCalledWith(deps, "ChessNote", "cursor-abc");
   });
 
   test("upload prefixes the path with the sync folder before calling the Dropbox API", async () => {

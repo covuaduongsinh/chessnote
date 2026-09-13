@@ -9,7 +9,13 @@ import {
   type SpaceOps,
   type SyncReport,
 } from "./sync_engine.ts";
-import { RemoteConflictError, type RemoteFileEntry, type SyncProvider, type WriteMode } from "./sync_provider.ts";
+import {
+  RemoteConflictError,
+  type ListEntriesResult,
+  type RemoteFileEntry,
+  type SyncProvider,
+  type WriteMode,
+} from "./sync_provider.ts";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const dec = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -86,14 +92,20 @@ class FakeSyncProvider implements SyncProvider {
     this.remoteFiles.set(path, { data: enc(content), rev, serverModified });
   }
 
-  async listEntries(folder: string): Promise<RemoteFileEntry[]> {
+  // Mặc định giả lập 1 provider KHÔNG hỗ trợ cursor/delta (như WebDAV thật) --
+  // luôn liệt kê đầy đủ, bỏ qua `priorCursor` -- đúng ngữ nghĩa mà toàn bộ
+  // test performSync generic ở file này đang dựa vào (thuật toán 4-case,
+  // không phải hiệu năng liệt kê remote). Hành vi cursor/delta của Dropbox
+  // được test riêng ở `dropbox_sync.test.ts` + `sync_engine.cursor.test.ts`.
+  async listEntries(folder: string): Promise<ListEntriesResult> {
     this.listEntriesCalls.push(folder);
-    return [...this.remoteFiles.entries()].map(([path, f]) => ({
+    const entries: RemoteFileEntry[] = [...this.remoteFiles.entries()].map(([path, f]) => ({
       path,
       rev: f.rev,
       serverModified: f.serverModified,
       deleted: false,
     }));
+    return { entries, cursor: undefined, full: true };
   }
 
   async download(_folder: string, path: string) {
@@ -317,7 +329,11 @@ describe("performSync (generic, over any SyncProvider)", () => {
       return result;
     };
 
-    const report = await performSync(provider, "", space);
+    // checkpointBatchSize: 1 -- ép mỗi path checkpoint ngay (đúng ngữ nghĩa
+    // gốc mà test này kiểm tra), vì performSync giờ mặc định gộp checkpoint
+    // theo lô (Giai đoạn 1.1, xem docs/plans) để tránh O(n²) I/O khi nhiều
+    // file thay đổi cùng lúc.
+    const report = await performSync(provider, "", space, { checkpointBatchSize: 1 });
 
     expect(report.errors).toEqual([{ path: "bad.md", error: "network boom" }]);
     expect(report.uploaded.sort()).toEqual(["a.md", "c.md"]);
@@ -528,6 +544,70 @@ describe("performSync state file path (multi-provider isolation)", () => {
     const webdavState = JSON.parse(dec(await space.readFile("_sync/webdav-state.json")));
     expect(dropboxState["shared.md"]).toBeDefined();
     expect(webdavState["shared.md"]).toBeDefined();
+  });
+});
+
+describe("performSync checkpoint batching (Giai đoạn 1.1 -- tránh O(n²) khi nhiều file thay đổi)", () => {
+  let provider: FakeSyncProvider;
+
+  beforeEach(() => {
+    provider = new FakeSyncProvider();
+  });
+
+  test("batches state writes by count instead of writing once per changed path", async () => {
+    const space = new FakeSpace();
+    for (let i = 0; i < 50; i++) space.put(`file-${i}.md`, `content ${i}`);
+
+    const stateWrites: string[] = [];
+    const originalWriteFile = space.writeFile.bind(space);
+    space.writeFile = async (path, data) => {
+      const result = await originalWriteFile(path, data);
+      if (path === "_sync/fake-state.json") stateWrites.push(dec(data));
+      return result;
+    };
+
+    // Interval lớn để loại trừ khả năng ngưỡng thời gian tự kích hoạt, cô lập
+    // đúng hành vi "theo số lượng" (checkpointBatchSize mặc định = 20).
+    const report = await performSync(provider, "", space, { checkpointIntervalMs: 60_000 });
+
+    expect(report.uploaded.length).toBe(50);
+    // 50 path / lô 20 -> checkpoint giữa vòng lặp ở path thứ 20 và 40, cộng 1
+    // lần lưu cuối bắt buộc sau vòng lặp = 3 lần, thay vì 50 lần như trước.
+    expect(stateWrites.length).toBe(3);
+  });
+
+  test("checkpoints by elapsed time even when the batch-size threshold hasn't been reached", async () => {
+    const space = new FakeSpace();
+    for (let i = 0; i < 5; i++) space.put(`slow-${i}.md`, `content ${i}`);
+
+    const stateWrites: string[] = [];
+    const originalWriteFile = space.writeFile.bind(space);
+    space.writeFile = async (path, data) => {
+      const result = await originalWriteFile(path, data);
+      if (path === "_sync/fake-state.json") stateWrites.push(dec(data));
+      return result;
+    };
+    // Mô phỏng mỗi path tốn thời gian thật (ví dụ round-trip mạng) -- đủ để
+    // vượt ngưỡng thời gian giữa các lần gọi liên tiếp.
+    const originalUpload = provider.upload.bind(provider);
+    provider.upload = async (folder, path, data, mode) => {
+      await new Promise((r) => setTimeout(r, 15));
+      return originalUpload(folder, path, data, mode);
+    };
+
+    // Batch size rất lớn (không bao giờ tự kích theo số lượng với chỉ 5 path)
+    // -- lần checkpoint duy nhất có thể xảy ra giữa vòng lặp phải đến từ mốc
+    // thời gian.
+    const report = await performSync(provider, "", space, {
+      checkpointBatchSize: 1_000,
+      checkpointIntervalMs: 10,
+    });
+
+    expect(report.uploaded.length).toBe(5);
+    // Ít nhất 1 lần checkpoint theo thời gian giữa vòng lặp, cộng lần lưu
+    // cuối bắt buộc -- tức nhiều hơn 1 (nếu chỉ có ngưỡng số lượng, với batch
+    // size 1000 sẽ chỉ có đúng 1 lần lưu duy nhất ở cuối).
+    expect(stateWrites.length).toBeGreaterThan(1);
   });
 });
 

@@ -6,7 +6,7 @@ import {
   DropboxConflictError,
   deleteFile as dbxDeleteFile,
   downloadFile as dbxDownloadFile,
-  listFolderRecursive,
+  listFolder,
   normalizeDropboxFolder,
   uploadFile as dbxUploadFile,
 } from "./dropbox_sync.ts";
@@ -17,8 +17,8 @@ export class DropboxSyncProvider implements SyncProvider {
 
   constructor(private deps: DropboxClientDeps) {}
 
-  async listEntries(folder: string) {
-    return await listFolderRecursive(this.deps, folder);
+  async listEntries(folder: string, priorCursor?: string) {
+    return await listFolder(this.deps, folder, priorCursor);
   }
 
   async download(folder: string, path: string) {

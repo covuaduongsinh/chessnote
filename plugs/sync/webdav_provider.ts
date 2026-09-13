@@ -16,8 +16,11 @@ export class WebDavSyncProvider implements SyncProvider {
 
   constructor(private auth: WebDavAuth) {}
 
+  // WebDAV (PROPFIND) không có cơ chế delta/cursor chuẩn -- luôn liệt kê đầy
+  // đủ, bỏ qua `priorCursor` (xem ListEntriesResult ở sync_provider.ts).
   async listEntries(folder: string) {
-    return await listEntriesRecursive(this.auth, folder);
+    const entries = await listEntriesRecursive(this.auth, folder);
+    return { entries, cursor: undefined, full: true as const };
   }
 
   async download(folder: string, path: string) {

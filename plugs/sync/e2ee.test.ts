@@ -71,13 +71,14 @@ describe("EncryptingSyncProvider", () => {
     stored = new Map<string, Uint8Array>();
     uploadedRaw: Uint8Array[] = [];
 
-    async listEntries(): Promise<RemoteFileEntry[]> {
-      return [...this.stored.keys()].map((path) => ({
+    async listEntries() {
+      const entries: RemoteFileEntry[] = [...this.stored.keys()].map((path) => ({
         path,
         rev: "r",
         serverModified: "s",
         deleted: false,
       }));
+      return { entries, cursor: undefined, full: true as const };
     }
     async download(_folder: string, path: string) {
       return { data: this.stored.get(path)!, rev: "r", serverModified: "s" };
@@ -121,7 +122,7 @@ describe("EncryptingSyncProvider", () => {
     await wrapped.listEntries("folder");
     await wrapped.delete("folder", "a.md");
 
-    expect(listEntriesSpy).toHaveBeenCalledWith("folder");
+    expect(listEntriesSpy).toHaveBeenCalledWith("folder", undefined);
     expect(deleteSpy).toHaveBeenCalledWith("folder", "a.md");
   });
 });

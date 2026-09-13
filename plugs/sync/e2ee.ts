@@ -158,8 +158,8 @@ export class EncryptingSyncProvider implements SyncProvider {
     this.name = inner.name;
   }
 
-  listEntries(folder: string) {
-    return this.inner.listEntries(folder);
+  listEntries(folder: string, priorCursor?: string) {
+    return this.inner.listEntries(folder, priorCursor);
   }
 
   async download(folder: string, path: string) {

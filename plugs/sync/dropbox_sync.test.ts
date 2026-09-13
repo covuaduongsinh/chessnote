@@ -7,7 +7,7 @@ import {
   exchangeCodeForTokens,
   generateCodeChallenge,
   generateCodeVerifier,
-  listFolderRecursive,
+  listFolder,
   refreshAccessToken,
   toAsciiSafeHeaderJson,
   uploadFile,
@@ -265,7 +265,7 @@ describe("apiFetch behavior (via uploadFile as a representative call)", () => {
   });
 });
 
-describe("listFolderRecursive", () => {
+describe("listFolder", () => {
   function makeDeps(): DropboxClientDeps {
     return {
       appKey: "app-key",
@@ -284,7 +284,7 @@ describe("listFolderRecursive", () => {
     vi.stubGlobal("nativeFetch", vi.fn());
   });
 
-  test("follows has_more/cursor across pages and strips the folder prefix", async () => {
+  test("no priorCursor -> full list_folder, follows has_more/cursor across pages, strips the folder prefix", async () => {
     (nativeFetch as any)
       .mockResolvedValueOnce(
         jsonResponse(200, {
@@ -306,32 +306,100 @@ describe("listFolderRecursive", () => {
             },
           ],
           has_more: false,
+          cursor: "cursor-2",
         }),
       );
 
-    const entries = await listFolderRecursive(makeDeps(), "ChessNote");
-    expect(entries).toEqual([
+    const result = await listFolder(makeDeps(), "ChessNote");
+    expect(result.full).toBe(true);
+    expect(result.cursor).toBe("cursor-2");
+    expect(result.entries).toEqual([
       { path: "a.md", rev: "r1", serverModified: "s1", deleted: false },
       { path: "b.md", rev: "", serverModified: "", deleted: true },
     ]);
     expect(nativeFetch).toHaveBeenCalledTimes(2);
+    const firstCallUrl = (nativeFetch as any).mock.calls[0][0];
+    expect(firstCallUrl).toContain("/files/list_folder");
+    expect(firstCallUrl).not.toContain("continue");
     const secondCallBody = JSON.parse((nativeFetch as any).mock.calls[1][1].body);
     expect(secondCallBody.cursor).toBe("cursor-1");
   });
 
   test("409 (folder not yet created on Dropbox) returns an empty list, not an error", async () => {
     (nativeFetch as any).mockResolvedValueOnce(jsonResponse(409, { error_summary: "path/not_found" }));
-    const entries = await listFolderRecursive(makeDeps(), "ChessNote");
-    expect(entries).toEqual([]);
+    const result = await listFolder(makeDeps(), "ChessNote");
+    expect(result.entries).toEqual([]);
+    expect(result.full).toBe(true);
+    expect(result.cursor).toBeUndefined();
   });
 
   test("a non-409 failure (e.g. 400 malformed path) surfaces Dropbox's error_summary", async () => {
     (nativeFetch as any).mockResolvedValueOnce(
       jsonResponse(400, { error_summary: "path/malformed_path/." }),
     );
-    await expect(listFolderRecursive(makeDeps(), "ChessNote")).rejects.toThrow(
-      /path\/malformed_path/,
+    await expect(listFolder(makeDeps(), "ChessNote")).rejects.toThrow(/path\/malformed_path/);
+  });
+
+  test("with a priorCursor -> calls list_folder/continue directly (delta, not full listing)", async () => {
+    (nativeFetch as any).mockResolvedValueOnce(
+      jsonResponse(200, {
+        entries: [
+          { ".tag": "file", path_display: "/ChessNote/changed.md", rev: "r9", server_modified: "s9" },
+        ],
+        has_more: false,
+        cursor: "cursor-next",
+      }),
     );
+
+    const result = await listFolder(makeDeps(), "ChessNote", "cursor-old");
+
+    expect(result.full).toBe(false);
+    expect(result.cursor).toBe("cursor-next");
+    expect(result.entries).toEqual([
+      { path: "changed.md", rev: "r9", serverModified: "s9", deleted: false },
+    ]);
+    expect(nativeFetch).toHaveBeenCalledTimes(1);
+    const url = (nativeFetch as any).mock.calls[0][0];
+    expect(url).toContain("/files/list_folder/continue");
+    const body = JSON.parse((nativeFetch as any).mock.calls[0][1].body);
+    expect(body.cursor).toBe("cursor-old");
+  });
+
+  test("an invalid/expired priorCursor (Dropbox 'reset') falls back to a full listing instead of throwing", async () => {
+    (nativeFetch as any)
+      .mockResolvedValueOnce(
+        jsonResponse(409, { error_summary: "reset/...", error: { ".tag": "reset" } }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          entries: [
+            { ".tag": "file", path_display: "/ChessNote/a.md", rev: "r1", server_modified: "s1" },
+          ],
+          has_more: false,
+          cursor: "cursor-fresh",
+        }),
+      );
+
+    const result = await listFolder(makeDeps(), "ChessNote", "stale-cursor");
+
+    expect(result.full).toBe(true); // fallback -> liệt kê đầy đủ, không phải delta
+    expect(result.cursor).toBe("cursor-fresh");
+    expect(result.entries).toEqual([{ path: "a.md", rev: "r1", serverModified: "s1", deleted: false }]);
+    expect(nativeFetch).toHaveBeenCalledTimes(2);
+    expect((nativeFetch as any).mock.calls[0][0]).toContain("/files/list_folder/continue");
+    expect((nativeFetch as any).mock.calls[1][0]).toContain("/files/list_folder");
+    expect((nativeFetch as any).mock.calls[1][0]).not.toContain("continue");
+  });
+
+  test("a genuine 409 error from list_folder/continue that is NOT a reset still throws (not silently swallowed)", async () => {
+    (nativeFetch as any).mockResolvedValueOnce(
+      jsonResponse(409, { error_summary: "path/not_found/...", error: { ".tag": "path" } }),
+    );
+
+    await expect(listFolder(makeDeps(), "ChessNote", "some-cursor")).rejects.toThrow(
+      /path\/not_found/,
+    );
+    expect(nativeFetch).toHaveBeenCalledTimes(1); // không fallback về full listing
   });
 });
 
