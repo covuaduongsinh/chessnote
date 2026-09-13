@@ -19,9 +19,21 @@ const CREDENTIALS_KEY = "webdavCredentials"; // khớp key trong webdav_bridge.t
 const INITIAL_RECONNECT_DELAY_MS = 5_000;
 const MAX_RECONNECT_DELAY_MS = 5 * 60_000;
 
+// Giai đoạn 1.2(a) (2026-09-13): 1 lượt sync ở thiết bị khác ghi N file ->
+// server phát N tín hiệu "changed" gần như liên tiếp (mỗi PUT/DELETE 1 tín
+// hiệu riêng, xem cloud-server/src/push.ts) -- không debounce ở đây thì mỗi
+// tín hiệu gọi thẳng `runAllConfiguredSyncs()`, có thể xếp hàng N lượt
+// full-sync thừa dù `providerLocks` (auto_trigger.ts) đã chặn được các lượt
+// CHỒNG LẤP thật sự đang chạy. Debounce ngắn (không phải 30s như
+// DEBOUNCE_AFTER_SAVE_MS ở auto_trigger.ts -- đây là kênh "realtime", không
+// nên trễ lâu) gộp cả 1 burst tín hiệu thành đúng 1 lượt sync sau khi burst
+// lắng xuống.
+const PUSH_DEBOUNCE_MS = 3_000;
+
 let socket: WebSocket | undefined;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
+let pushDebounceTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function buildPushUrl(webdavUrl: string, auth: WebDavAuth): string {
   const u = new URL(webdavUrl);
@@ -59,6 +71,10 @@ function disconnect() {
     clearTimeout(reconnectTimer);
     reconnectTimer = undefined;
   }
+  if (pushDebounceTimer !== undefined) {
+    clearTimeout(pushDebounceTimer);
+    pushDebounceTimer = undefined;
+  }
   reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
   socket?.close();
   socket = undefined;
@@ -93,7 +109,11 @@ async function connect(): Promise<void> {
     reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS; // kết nối khoẻ -- reset backoff
   };
   ws.onmessage = () => {
-    void runAllConfiguredSyncs();
+    if (pushDebounceTimer !== undefined) clearTimeout(pushDebounceTimer);
+    pushDebounceTimer = setTimeout(() => {
+      pushDebounceTimer = undefined;
+      void runAllConfiguredSyncs();
+    }, PUSH_DEBOUNCE_MS);
   };
   ws.onclose = () => {
     if (socket === ws) socket = undefined;

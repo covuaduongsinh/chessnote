@@ -23,17 +23,35 @@ export function registerConnection(username: string, ws: WebSocket): void {
   });
 }
 
+// Giai đoạn 1.2(b) (2026-09-13): mỗi PUT/DELETE gọi `broadcastChanged` riêng
+// (server.ts) -- 1 lượt sync ghi N file ở thiết bị A phát ra N tín hiệu gần
+// như liên tiếp tới thiết bị B, có thể xếp hàng nhiều lượt full-sync thừa dù
+// phía client đã debounce (push_trigger.ts, Giai đoạn 1.2a) -- gộp tại gốc để
+// giảm tải mạng/CPU cho MỌI client, kể cả client cũ chưa cập nhật debounce.
+const BROADCAST_COALESCE_MS = 800;
+const pendingBroadcastByUser = new Map<string, ReturnType<typeof setTimeout>>();
+
 /** Phát tín hiệu tới TẤT CẢ kết nối của `username`, kể cả kết nối vừa gây ra
  * thay đổi (client tự gọi lại sync sẽ chỉ thấy "không có gì mới" — vô hại,
- * đơn giản hơn là phải theo dõi "ai vừa ghi" để loại trừ chính họ). */
+ * đơn giản hơn là phải theo dõi "ai vừa ghi" để loại trừ chính họ).
+ *
+ * Gộp (coalesce) nhiều lần gọi liên tiếp trong `BROADCAST_COALESCE_MS` thành
+ * đúng 1 lần gửi thật -- đọc `connectionsByUser` tại THỜI ĐIỂM timer bắn (không
+ * snapshot lúc gọi hàm này), để không gửi nhầm tới 1 kết nối đã đóng hoặc bỏ
+ * lỡ 1 kết nối mới mở trong lúc chờ. */
 export function broadcastChanged(username: string): void {
-  const set = connectionsByUser.get(username);
-  if (!set) return;
-  for (const ws of set) {
-    if (ws.readyState === ws.OPEN) {
-      ws.send("changed");
+  if (pendingBroadcastByUser.has(username)) return; // đã có 1 lần gửi đang chờ -- gộp vào đó
+  const timer = setTimeout(() => {
+    pendingBroadcastByUser.delete(username);
+    const set = connectionsByUser.get(username);
+    if (!set) return;
+    for (const ws of set) {
+      if (ws.readyState === ws.OPEN) {
+        ws.send("changed");
+      }
     }
-  }
+  }, BROADCAST_COALESCE_MS);
+  pendingBroadcastByUser.set(username, timer);
 }
 
 /** Chỉ dùng cho test — đếm số kết nối đang mở của 1 user. */

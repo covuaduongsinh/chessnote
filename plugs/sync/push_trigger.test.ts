@@ -148,9 +148,26 @@ describe("message handling and reconnect backoff", () => {
     return mod;
   }
 
-  test("an incoming message triggers runAllConfiguredSyncs", async () => {
+  test("an incoming message triggers runAllConfiguredSyncs after the debounce delay", async () => {
     await connectedModule();
     latestSocket().onmessage?.({ data: "changed" });
+    expect(runAllConfiguredSyncs).not.toHaveBeenCalled(); // chưa gọi ngay -- đang debounce
+    await vi.advanceTimersByTimeAsync(3_000); // PUSH_DEBOUNCE_MS
+    expect(runAllConfiguredSyncs).toHaveBeenCalledTimes(1);
+  });
+
+  test("a burst of messages within the debounce window coalesces into a single sync (Giai đoạn 1.2a)", async () => {
+    await connectedModule();
+    const socket = latestSocket();
+    // Mô phỏng N file thay đổi ở thiết bị khác -> N tín hiệu "changed" gần
+    // như liên tiếp (xem cloud-server/src/push.ts broadcastChanged).
+    for (let i = 0; i < 10; i++) {
+      socket.onmessage?.({ data: "changed" });
+      await vi.advanceTimersByTimeAsync(200); // < PUSH_DEBOUNCE_MS giữa các tín hiệu
+    }
+    expect(runAllConfiguredSyncs).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(3_000); // burst lắng xuống -> debounce bắn
     expect(runAllConfiguredSyncs).toHaveBeenCalledTimes(1);
   });
 
