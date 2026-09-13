@@ -279,10 +279,27 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     noKing ? "display: none;" : ""
   }">⚡ Engine Eval</button>
         <button class="chess-btn" id="${widgetId}_theme_btn" title="Tuỳ chỉnh bàn cờ và quân cờ">🎨 Theme</button>
+        <button class="chess-btn" id="${widgetId}_edit_toggle" title="Bật/tắt chế độ sửa bàn cờ (thêm, xoá, di chuyển quân tự do — bỏ qua luật cờ vua)">✏️ Sửa bàn cờ</button>
         <button class="chess-btn" id="${widgetId}_flip">🔄 Flip</button>
         <button class="chess-btn" id="${widgetId}_reset">⏮ Reset</button>
         <button class="chess-btn" id="${widgetId}_copy_fen">📋 Copy FEN</button>
         <button class="chess-btn" id="${widgetId}_lichess">🔍 Lichess Analysis</button>
+      </div>
+      <div class="chess-edit-panel" id="${widgetId}_edit_panel" style="display: none;">
+        <div class="chess-edit-palette" id="${widgetId}_edit_palette"></div>
+        <div class="chess-edit-tools">
+          <button class="chess-btn chess-edit-tool" id="${widgetId}_edit_erase" title="Công cụ xoá quân — chọn rồi bấm vào 1 ô có quân để xoá">🗑️ Xoá quân</button>
+          <label class="chess-edit-turn">
+            <input type="radio" name="${widgetId}_edit_turn" id="${widgetId}_edit_turn_w" value="w" checked> Trắng đi
+          </label>
+          <label class="chess-edit-turn">
+            <input type="radio" name="${widgetId}_edit_turn" id="${widgetId}_edit_turn_b" value="b"> Đen đi
+          </label>
+        </div>
+        <div class="chess-edit-fen-row">
+          <input type="text" class="chess-edit-fen-input" id="${widgetId}_edit_fen_input" spellcheck="false" autocomplete="off" value="${escapeHtml(fen)}">
+          <button class="chess-btn" id="${widgetId}_edit_fen_load">Tải</button>
+        </div>
       </div>
       <div class="chess-engine-panel" id="${widgetId}_engine_panel" style="display: none;">
         <div class="engine-line">
@@ -327,11 +344,22 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   let isEngineOn = false;
   let currentBestMove = null;
   let isBusy = false; // true while a move syscall round-trip is in flight
+  let editMode = false;
+  let armedTool = null; // null | "erase" | "wP" | "wN" | "wB" | "wR" | "wQ" | "wK" | "b..."
+  let wasEngineOnBeforeEdit = false; // to restore Engine Eval state after leaving edit mode
 
   const boardEl = document.getElementById("${widgetId}_board");
   const arrowsEl = document.getElementById("${widgetId}_arrows");
   const fenTextEl = document.getElementById("${widgetId}_fen_text");
   const errorEl = document.getElementById("${widgetId}_error");
+  const editToggleBtn = document.getElementById("${widgetId}_edit_toggle");
+  const editPanel = document.getElementById("${widgetId}_edit_panel");
+  const editPaletteEl = document.getElementById("${widgetId}_edit_palette");
+  const editEraseBtn = document.getElementById("${widgetId}_edit_erase");
+  const editTurnW = document.getElementById("${widgetId}_edit_turn_w");
+  const editTurnB = document.getElementById("${widgetId}_edit_turn_b");
+  const editFenInput = document.getElementById("${widgetId}_edit_fen_input");
+  const editFenLoadBtn = document.getElementById("${widgetId}_edit_fen_load");
   const flipBtn = document.getElementById("${widgetId}_flip");
   const resetBtn = document.getElementById("${widgetId}_reset");
   const copyFenBtn = document.getElementById("${widgetId}_copy_fen");
@@ -379,6 +407,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
       container.style.setProperty("--sq-dest", theme.dest);
     }
     renderBoard();
+    renderEditPalette();
   }
 
   // Initial theme application
@@ -515,6 +544,241 @@ export async function fenWidget(bodyText: string, _pageName: string) {
       }
     }
     return board;
+  }
+
+  // Mirror of parseFenBoard(): rebuilds field 1 (board layout) of a FEN from
+  // a {"e4":"wP",...} map. Pure string munging, no chess.js involved on
+  // purpose -- the board editor must be able to represent positions
+  // chess.js itself would reject (2 kings of one color, 0 kings, etc).
+  function buildFenBoard(boardMap, activeColor) {
+    const rows = [];
+    for (let rank = 8; rank >= 1; rank--) {
+      let row = "";
+      let empty = 0;
+      for (let f = 0; f < 8; f++) {
+        const file = String.fromCharCode(97 + f);
+        const piece = boardMap[file + rank];
+        if (!piece) {
+          empty++;
+          continue;
+        }
+        if (empty > 0) {
+          row += empty;
+          empty = 0;
+        }
+        const letter = piece[1];
+        row += piece[0] === "w" ? letter.toUpperCase() : letter.toLowerCase();
+      }
+      if (empty > 0) row += empty;
+      rows.push(row);
+    }
+    return rows.join("/") + " " + (activeColor === "b" ? "b" : "w");
+  }
+
+  // Rebuilds the *whole* FEN after an edit-mode board mutation, preserving
+  // whatever castling/en-passant/halfmove/fullmove fields currentFen already
+  // had (editing the board itself shouldn't silently wipe e.g. castling
+  // rights the user typed by hand).
+  function commitEditedBoard(boardMap, activeColor) {
+    const parts = currentFen.split(" ");
+    const castling = parts[2] || "-";
+    const enPassant = parts[3] || "-";
+    const halfmove = parts[4] || "0";
+    const fullmove = parts[5] || "1";
+    currentFen =
+      buildFenBoard(boardMap, activeColor) + " " + castling + " " + enPassant + " " + halfmove + " " + fullmove;
+    fenTextEl.innerText = currentFen;
+    if (editFenInput) editFenInput.value = currentFen;
+    renderBoard();
+  }
+
+  const EDIT_PIECE_KEYS = ["wK", "wQ", "wR", "wB", "wN", "wP", "bK", "bQ", "bR", "bB", "bN", "bP"];
+
+  function renderEditPalette() {
+    if (!editPaletteEl) return;
+    editPaletteEl.innerHTML = "";
+    const currentPieces = PIECE_SETS[currentPieceSet] || PIECE_SETS["merida"];
+    EDIT_PIECE_KEYS.forEach((key) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "chess-edit-piece-btn" + (armedTool === key ? " armed" : "");
+      btn.title = key;
+      btn.innerHTML = currentPieces[key] || key;
+      btn.addEventListener("click", () => {
+        armedTool = armedTool === key ? null : key;
+        selectedSquare = null;
+        renderEditPalette();
+        updateEraseBtnState();
+        renderBoard();
+      });
+      editPaletteEl.appendChild(btn);
+    });
+  }
+
+  function updateEraseBtnState() {
+    if (editEraseBtn) editEraseBtn.classList.toggle("armed", armedTool === "erase");
+  }
+
+  function handleEditSquareClick(sq, boardState) {
+    const activeColor = editTurnB && editTurnB.checked ? "b" : "w";
+
+    // (a) A piece is armed from the palette -> stamp it onto the clicked
+    // square, overwriting anything already there. Deliberately allows
+    // transient illegal states (e.g. 2 kings of the same color mid-swap).
+    if (armedTool && armedTool !== "erase") {
+      const boardMap = Object.assign({}, boardState);
+      boardMap[sq] = armedTool;
+      commitEditedBoard(boardMap, activeColor);
+      return;
+    }
+
+    // (b) Eraser armed -> remove whatever piece (if any) sits on the
+    // clicked square. No-op on an empty square.
+    if (armedTool === "erase") {
+      if (!boardState[sq]) return;
+      const boardMap = Object.assign({}, boardState);
+      delete boardMap[sq];
+      commitEditedBoard(boardMap, activeColor);
+      return;
+    }
+
+    // (c) No tool armed -> free click-to-move: first click on an occupied
+    // square selects it (any color, any piece, no turn restriction), second
+    // click on ANY square (occupied or not) relocates it there, overwriting
+    // whatever was on the destination. Click-select-click mirrors the
+    // existing play-mode pattern instead of HTML5 drag-and-drop.
+    if (selectedSquare === sq) {
+      selectedSquare = null;
+      renderBoard();
+      return;
+    }
+    if (selectedSquare) {
+      const boardMap = Object.assign({}, boardState);
+      const moved = boardMap[selectedSquare];
+      delete boardMap[selectedSquare];
+      boardMap[sq] = moved;
+      selectedSquare = null;
+      commitEditedBoard(boardMap, activeColor);
+      return;
+    }
+    if (boardState[sq]) {
+      selectedSquare = sq;
+      renderBoard();
+    }
+  }
+
+  function setEditMode(on) {
+    editMode = on;
+    armedTool = null;
+    selectedSquare = null;
+    legalMoves = [];
+    showError(null);
+
+    editToggleBtn.classList.toggle("active", editMode);
+    editPanel.style.display = editMode ? "flex" : "none";
+
+    if (editMode) {
+      // Analysing a deliberately in-progress/illegal position is meaningless
+      // and would spam chess.engineEval while the user is still placing
+      // pieces -- force Engine Eval off, remember it to restore on exit.
+      wasEngineOnBeforeEdit = isEngineOn;
+      if (isEngineOn) {
+        isEngineOn = false;
+        evalToggleBtn.classList.remove("active");
+        evalBarEl.style.display = "none";
+        enginePanel.style.display = "none";
+        evalRequestSeq++;
+        lastEvalFen = null;
+        currentBestMove = null;
+      }
+      evalToggleBtn.disabled = true;
+      evalToggleBtn.title = "Tắt chế độ sửa bàn cờ để dùng Engine Eval";
+    } else {
+      evalToggleBtn.disabled = false;
+      evalToggleBtn.title = "";
+      if (wasEngineOnBeforeEdit) {
+        isEngineOn = true;
+        evalToggleBtn.classList.add("active");
+        evalBarEl.style.display = "flex";
+        enginePanel.style.display = "flex";
+      }
+
+      // Warn (don't block) if the position we're leaving behind isn't legal
+      // for normal chess play -- chess.legalMoves/chess.applyMove will just
+      // silently return []/{error} for it (see openChessLenient on the
+      // worker side), so the board would otherwise look "stuck" with no
+      // explanation.
+      const boardState = parseFenBoard(currentFen);
+      const pieces = Object.values(boardState);
+      const wKings = pieces.filter((p) => p === "wK").length;
+      const bKings = pieces.filter((p) => p === "bK").length;
+      if (wKings !== 1 || bKings !== 1) {
+        showError(
+          "Thế cờ hiện không có đúng 1 Vua mỗi bên (Trắng: " + wKings + ", Đen: " + bKings +
+            ") — chơi tiếp theo luật cờ vua sẽ không hoạt động cho tới khi sửa lại. Dùng 📋 Copy FEN để lưu lại thế cờ minh hoạ này.",
+        );
+      }
+    }
+
+    const activeColor = currentFen.split(" ")[1] === "b" ? "b" : "w";
+    if (editTurnW) editTurnW.checked = activeColor === "w";
+    if (editTurnB) editTurnB.checked = activeColor === "b";
+    if (editFenInput) editFenInput.value = currentFen;
+
+    renderEditPalette();
+    updateEraseBtnState();
+    renderBoard();
+    if (isEngineOn) updateEngineEval();
+  }
+
+  editToggleBtn.addEventListener("click", () => {
+    if (isBusy) return;
+    setEditMode(!editMode);
+  });
+
+  if (editEraseBtn) {
+    editEraseBtn.addEventListener("click", () => {
+      armedTool = armedTool === "erase" ? null : "erase";
+      selectedSquare = null;
+      updateEraseBtnState();
+      renderEditPalette();
+      renderBoard();
+    });
+  }
+
+  [editTurnW, editTurnB].forEach((radio) => {
+    if (!radio) return;
+    radio.addEventListener("change", () => {
+      if (!editMode) return;
+      const boardState = parseFenBoard(currentFen);
+      commitEditedBoard(boardState, editTurnW && editTurnW.checked ? "w" : "b");
+    });
+  });
+
+  if (editFenLoadBtn) {
+    editFenLoadBtn.addEventListener("click", () => {
+      const raw = (editFenInput.value || "").trim();
+      if (!raw) return;
+      const fields = raw.split(/\s+/);
+      if (fields.length !== 6) {
+        showError(
+          "FEN có " + fields.length +
+            " trường thay vì 6 (board, lượt đi, nhập thành, bắt tốt qua đường, nửa nước, số nước) — vẫn áp dụng nguyên văn, nhưng luật cờ/engine có thể không hoạt động đúng.",
+        );
+      } else if (fields[0].split("/").length !== 8) {
+        showError("Phần bàn cờ của FEN không có đủ 8 hàng — vẫn áp dụng nguyên văn.");
+      } else {
+        showError(null);
+      }
+      currentFen = raw;
+      fenTextEl.innerText = currentFen;
+      selectedSquare = null;
+      legalMoves = [];
+      const activeColor = fields[1] === "b" ? "b" : "w";
+      if (editTurnW) editTurnW.checked = activeColor === "w";
+      if (editTurnB) editTurnB.checked = activeColor === "b";
+      renderBoard();
+    });
   }
 
   let lastEvalFen = null;
@@ -681,6 +945,14 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   }
 
   async function handleSquareClick(sq, boardState) {
+    // Edit mode is a fully separate code path -- no chess.legalMoves /
+    // chess.applyMove syscalls are ever made while it's on, since the whole
+    // point is to bypass chess rules (including "max 1 king per color").
+    if (editMode) {
+      handleEditSquareClick(sq, boardState);
+      return;
+    }
+
     if (isBusy) return;
 
     // Clicking a highlighted legal destination while a piece is selected:
@@ -774,8 +1046,17 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     currentFen = initialFen;
     selectedSquare = null;
     legalMoves = [];
+    armedTool = null;
     showError(null);
     fenTextEl.innerText = currentFen;
+    if (editFenInput) editFenInput.value = currentFen;
+    if (editMode) {
+      const activeColor = currentFen.split(" ")[1] === "b" ? "b" : "w";
+      if (editTurnW) editTurnW.checked = activeColor === "w";
+      if (editTurnB) editTurnB.checked = activeColor === "b";
+      renderEditPalette();
+      updateEraseBtnState();
+    }
     renderBoard();
   });
 

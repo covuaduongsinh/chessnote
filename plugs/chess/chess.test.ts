@@ -58,6 +58,24 @@ describe("Chess Plug Unit Tests", () => {
     expect(result.script).toContain("c4-f7:red");
   });
 
+  test("fenWidget renders a board-editor toggle/palette and its embedded script has no JS syntax errors", async () => {
+    const fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    const result: any = await fenWidget(fen, "TestPage");
+
+    expect(result.html).toContain("Sửa bàn cờ");
+    expect(result.html).toContain("edit_palette");
+    // `new Function` only parses the source (never executes it, since the
+    // script assumes a real DOM/syscall bridge) -- catches the exact class
+    // of embedded-template-literal typo that's easy to introduce and easy
+    // to miss by eye in a multi-hundred-line inline <script>.
+    expect(() => new Function(result.script)).not.toThrow();
+  });
+
+  test("fenWidget's board-editor script also parses cleanly for a kingless FEN", async () => {
+    const result: any = await fenWidget("8/8/8/8/3R4/8/8/8 w - - 0 1", "TestPage");
+    expect(() => new Function(result.script)).not.toThrow();
+  });
+
   test("pgnWidget parses PGN header, moves, and generates move tree", async () => {
     const pgn = `[Event "World Championship 2024"]
 [White "Ding, Liren"]

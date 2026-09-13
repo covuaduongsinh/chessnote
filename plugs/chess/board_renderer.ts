@@ -512,6 +512,87 @@ html, body {
   color: #ffffff;
 }
 
+.chess-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chess-edit-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(234, 179, 8, 0.12);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.chess-edit-palette {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+
+.chess-edit-piece-btn {
+  background: var(--btn-bg);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+}
+
+.chess-edit-piece-btn:hover {
+  background: var(--btn-hover);
+}
+
+.chess-edit-piece-btn.armed {
+  border-color: #eab308;
+  background: rgba(234, 179, 8, 0.25);
+}
+
+.chess-edit-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.chess-edit-tool.armed {
+  background: #eab308;
+  color: #1e293b;
+  border-color: #eab308;
+}
+
+.chess-edit-turn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.chess-edit-fen-row {
+  display: flex;
+  gap: 6px;
+}
+
+.chess-edit-fen-input {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-main);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
 .ai-coach-panel {
   background: rgba(76, 29, 149, 0.2);
   border: 1px solid rgba(124, 58, 237, 0.3);
