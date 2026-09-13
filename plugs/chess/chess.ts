@@ -296,6 +296,17 @@ export async function fenWidget(bodyText: string, _pageName: string) {
             <input type="radio" name="${widgetId}_edit_turn" id="${widgetId}_edit_turn_b" value="b"> Đen đi
           </label>
         </div>
+        <div class="chess-edit-castling">
+          <label class="chess-edit-turn"><input type="checkbox" id="${widgetId}_edit_castle_K"> 0-0 (Trắng)</label>
+          <label class="chess-edit-turn"><input type="checkbox" id="${widgetId}_edit_castle_Q"> 0-0-0 (Trắng)</label>
+          <label class="chess-edit-turn"><input type="checkbox" id="${widgetId}_edit_castle_k"> 0-0 (Đen)</label>
+          <label class="chess-edit-turn"><input type="checkbox" id="${widgetId}_edit_castle_q"> 0-0-0 (Đen)</label>
+        </div>
+        <div class="chess-edit-ep-row">
+          <label class="chess-edit-turn">Bắt tốt qua đường:
+            <select class="chess-edit-ep-select" id="${widgetId}_edit_ep_select"><option value="-">Không có</option></select>
+          </label>
+        </div>
         <div class="chess-edit-fen-row">
           <input type="text" class="chess-edit-fen-input" id="${widgetId}_edit_fen_input" spellcheck="false" autocomplete="off" value="${escapeHtml(fen)}">
           <button class="chess-btn" id="${widgetId}_edit_fen_load">Tải</button>
@@ -347,6 +358,19 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   let editMode = false;
   let armedTool = null; // null | "erase" | "wP" | "wN" | "wB" | "wR" | "wQ" | "wK" | "b..."
   let wasEngineOnBeforeEdit = false; // to restore Engine Eval state after leaving edit mode
+  // Pre-existing bug (present since the board-editor commit, unrelated to
+  // castling/en-passant work): this MUST be declared before the initial
+  // applyTheme(...) call below -- applyTheme() unconditionally calls
+  // renderEditPalette(), which reads EDIT_PIECE_KEYS, and a top-level const
+  // used before its own declaration line throws a TDZ ReferenceError that
+  // aborts the whole script eval right here. Every statement after that
+  // point never runs -- including every button's addEventListener call further
+  // down -- so in practice EVERY button on this widget (Engine Eval, Theme,
+  // Sửa bàn cờ, Flip, Reset, Copy FEN, Lichess Analysis) silently does nothing
+  // on click. Confirmed live: this array used to be declared much later
+  // (right before its original renderEditPalette()), well after this file's
+  // first applyTheme(...) call.
+  const EDIT_PIECE_KEYS = ["wK", "wQ", "wR", "wB", "wN", "wP", "bK", "bQ", "bR", "bB", "bN", "bP"];
 
   const boardEl = document.getElementById("${widgetId}_board");
   const arrowsEl = document.getElementById("${widgetId}_arrows");
@@ -360,6 +384,11 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   const editTurnB = document.getElementById("${widgetId}_edit_turn_b");
   const editFenInput = document.getElementById("${widgetId}_edit_fen_input");
   const editFenLoadBtn = document.getElementById("${widgetId}_edit_fen_load");
+  const editCastleK = document.getElementById("${widgetId}_edit_castle_K");
+  const editCastleQ = document.getElementById("${widgetId}_edit_castle_Q");
+  const editCastlek = document.getElementById("${widgetId}_edit_castle_k");
+  const editCastleq = document.getElementById("${widgetId}_edit_castle_q");
+  const editEpSelect = document.getElementById("${widgetId}_edit_ep_select");
   const flipBtn = document.getElementById("${widgetId}_flip");
   const resetBtn = document.getElementById("${widgetId}_reset");
   const copyFenBtn = document.getElementById("${widgetId}_copy_fen");
@@ -575,14 +604,83 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     return rows.join("/") + " " + (activeColor === "b" ? "b" : "w");
   }
 
-  // Rebuilds the *whole* FEN after an edit-mode board mutation, preserving
-  // whatever castling/en-passant/halfmove/fullmove fields currentFen already
-  // had (editing the board itself shouldn't silently wipe e.g. castling
-  // rights the user typed by hand).
+  // Which of the 4 castling rights are even geometrically possible on this
+  // board -- king and rook both still on their home squares. Edit mode has
+  // no move history, so "has this king/rook ever moved" isn't answerable;
+  // this is the same static-position reading lichess's own board editor
+  // uses (its computeCastlingToggles, ui/editor/src/ctrl.ts).
+  function computeCastlingAvailability(boardMap) {
+    return {
+      K: boardMap["e1"] === "wK" && boardMap["h1"] === "wR",
+      Q: boardMap["e1"] === "wK" && boardMap["a1"] === "wR",
+      k: boardMap["e8"] === "bK" && boardMap["h8"] === "bR",
+      q: boardMap["e8"] === "bK" && boardMap["a8"] === "bR",
+    };
+  }
+
+  // Squares a en-passant-FEN-field value could plausibly be, given only a
+  // static board (no move history to confirm a pawn "just" double-stepped).
+  // Purely geometric, same limitation lichess's editor has (its own
+  // enPassantOptions comment notes chessops doesn't fully solve this either):
+  // for activeColor to move, the candidate is the empty square directly
+  // behind an opposing pawn that looks like it double-stepped -- itself and
+  // the square it would have started from both empty.
+  function computeEnPassantCandidates(boardMap, activeColor) {
+    const candidates = [];
+    const behindRank = activeColor === "w" ? 6 : 3;
+    const pawnRank = activeColor === "w" ? 5 : 4;
+    const startRank = activeColor === "w" ? 7 : 2;
+    const opponentPawn = activeColor === "w" ? "bP" : "wP";
+    for (let f = 0; f < 8; f++) {
+      const file = String.fromCharCode(97 + f);
+      if (boardMap[file + behindRank]) continue;
+      if (boardMap[file + startRank]) continue;
+      if (boardMap[file + pawnRank] === opponentPawn) candidates.push(file + behindRank);
+    }
+    return candidates;
+  }
+
+  // Syncs the 4 castling checkboxes + en-passant <select> to what's actually
+  // possible on boardMap/activeColor right now -- disables/unchecks a
+  // castling right whose king or rook is no longer on its home square, and
+  // rebuilds the en-passant option list (keeping the current selection if
+  // it's still a valid candidate, otherwise falling back to "-").
+  function syncEditFlagsUI(boardMap, activeColor, preferredEp) {
+    const availability = computeCastlingAvailability(boardMap);
+    [
+      [editCastleK, "K"],
+      [editCastleQ, "Q"],
+      [editCastlek, "k"],
+      [editCastleq, "q"],
+    ].forEach(([box, key]) => {
+      if (!box) return;
+      box.disabled = !availability[key];
+      if (!availability[key]) box.checked = false;
+    });
+
+    if (editEpSelect) {
+      const prev = preferredEp !== undefined ? preferredEp : (editEpSelect.value || "-");
+      const candidates = computeEnPassantCandidates(boardMap, activeColor);
+      editEpSelect.innerHTML = "<option value='-'>Không có</option>" +
+        candidates.map((sq) => "<option value='" + sq + "'>" + sq + "</option>").join("");
+      editEpSelect.value = candidates.includes(prev) ? prev : "-";
+    }
+  }
+
+  // Rebuilds the *whole* FEN after an edit-mode board mutation. Castling and
+  // en-passant come from the checkboxes/select (synced to the NEW board just
+  // above), not blindly preserved from the old FEN -- e.g. erasing a rook
+  // must actually clear the matching castling right, not just gray it out.
   function commitEditedBoard(boardMap, activeColor) {
+    syncEditFlagsUI(boardMap, activeColor);
     const parts = currentFen.split(" ");
-    const castling = parts[2] || "-";
-    const enPassant = parts[3] || "-";
+    const castling = [
+      editCastleK && editCastleK.checked ? "K" : "",
+      editCastleQ && editCastleQ.checked ? "Q" : "",
+      editCastlek && editCastlek.checked ? "k" : "",
+      editCastleq && editCastleq.checked ? "q" : "",
+    ].join("") || "-";
+    const enPassant = (editEpSelect && editEpSelect.value) || "-";
     const halfmove = parts[4] || "0";
     const fullmove = parts[5] || "1";
     currentFen =
@@ -591,8 +689,6 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     if (editFenInput) editFenInput.value = currentFen;
     renderBoard();
   }
-
-  const EDIT_PIECE_KEYS = ["wK", "wQ", "wR", "wB", "wN", "wP", "bK", "bQ", "bR", "bB", "bN", "bP"];
 
   function renderEditPalette() {
     if (!editPaletteEl) return;
@@ -725,6 +821,20 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     if (editTurnB) editTurnB.checked = activeColor === "b";
     if (editFenInput) editFenInput.value = currentFen;
 
+    // Seed the castling/en-passant controls from whatever currentFen already
+    // says (e.g. a FEN pasted/loaded before entering edit mode), then let
+    // syncEditFlagsUI enforce which of those are actually still possible on
+    // this board -- a hand-typed FEN can claim a right that no longer makes
+    // geometric sense.
+    const fenPartsForFlags = currentFen.split(" ");
+    const existingCastling = fenPartsForFlags[2] || "-";
+    const existingEp = fenPartsForFlags[3] || "-";
+    if (editCastleK) editCastleK.checked = existingCastling.includes("K");
+    if (editCastleQ) editCastleQ.checked = existingCastling.includes("Q");
+    if (editCastlek) editCastlek.checked = existingCastling.includes("k");
+    if (editCastleq) editCastleq.checked = existingCastling.includes("q");
+    syncEditFlagsUI(parseFenBoard(currentFen), activeColor, existingEp);
+
     renderEditPalette();
     updateEraseBtnState();
     renderBoard();
@@ -755,6 +865,18 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     });
   });
 
+  // Castling checkboxes + en-passant select don't touch the board -- just
+  // re-derive the FEN's flags fields from their current state (whatever
+  // availability syncEditFlagsUI already enforced this render).
+  [editCastleK, editCastleQ, editCastlek, editCastleq, editEpSelect].forEach((el) => {
+    if (!el) return;
+    el.addEventListener("change", () => {
+      if (!editMode) return;
+      const boardState = parseFenBoard(currentFen);
+      commitEditedBoard(boardState, editTurnW && editTurnW.checked ? "w" : "b");
+    });
+  });
+
   if (editFenLoadBtn) {
     editFenLoadBtn.addEventListener("click", () => {
       const raw = (editFenInput.value || "").trim();
@@ -777,6 +899,13 @@ export async function fenWidget(bodyText: string, _pageName: string) {
       const activeColor = fields[1] === "b" ? "b" : "w";
       if (editTurnW) editTurnW.checked = activeColor === "w";
       if (editTurnB) editTurnB.checked = activeColor === "b";
+      const loadedCastling = fields[2] || "-";
+      const loadedEp = fields[3] || "-";
+      if (editCastleK) editCastleK.checked = loadedCastling.includes("K");
+      if (editCastleQ) editCastleQ.checked = loadedCastling.includes("Q");
+      if (editCastlek) editCastlek.checked = loadedCastling.includes("k");
+      if (editCastleq) editCastleq.checked = loadedCastling.includes("q");
+      syncEditFlagsUI(parseFenBoard(currentFen), activeColor, loadedEp);
       renderBoard();
     });
   }

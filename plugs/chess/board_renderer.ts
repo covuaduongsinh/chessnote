@@ -576,6 +576,31 @@ html, body {
   cursor: pointer;
 }
 
+.chess-edit-castling {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.chess-edit-ep-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.chess-edit-ep-select {
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-main);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+
 .chess-edit-fen-row {
   display: flex;
   gap: 6px;

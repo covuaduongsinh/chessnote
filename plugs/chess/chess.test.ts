@@ -64,6 +64,13 @@ describe("Chess Plug Unit Tests", () => {
 
     expect(result.html).toContain("Sửa bàn cờ");
     expect(result.html).toContain("edit_palette");
+    // Castling rights + en-passant controls (Giai đoạn 2, 2026-09-13) --
+    // added alongside the existing piece palette/turn radios/FEN input.
+    expect(result.html).toContain("edit_castle_K");
+    expect(result.html).toContain("edit_castle_Q");
+    expect(result.html).toContain("edit_castle_k");
+    expect(result.html).toContain("edit_castle_q");
+    expect(result.html).toContain("edit_ep_select");
     // `new Function` only parses the source (never executes it, since the
     // script assumes a real DOM/syscall bridge) -- catches the exact class
     // of embedded-template-literal typo that's easy to introduce and easy
@@ -74,6 +81,77 @@ describe("Chess Plug Unit Tests", () => {
   test("fenWidget's board-editor script also parses cleanly for a kingless FEN", async () => {
     const result: any = await fenWidget("8/8/8/8/3R4/8/8/8 w - - 0 1", "TestPage");
     expect(() => new Function(result.script)).not.toThrow();
+  });
+
+  // --- Board-editor castling/en-passant geometry (Giai đoạn 2, 2026-09-13) ---
+  //
+  // computeCastlingAvailability/computeEnPassantCandidates live inline inside
+  // the widget's embedded <script> (no DOM here to actually mount it and
+  // click checkboxes -- see the module comment on `new Function` above), so
+  // this pulls the REAL shipped function source out of result.script by name
+  // (brace-balanced, not a hand-copied reimplementation that could silently
+  // drift from what's actually deployed) and exercises it directly.
+  function extractFunction(script: string, name: string): (...args: any[]) => any {
+    const start = script.indexOf(`function ${name}(`);
+    if (start === -1) throw new Error(`function ${name} not found in script`);
+    const braceStart = script.indexOf("{", start);
+    let depth = 0;
+    let i = braceStart;
+    for (; i < script.length; i++) {
+      if (script[i] === "{") depth++;
+      else if (script[i] === "}") {
+        depth--;
+        if (depth === 0) break;
+      }
+    }
+    const source = script.slice(start, i + 1);
+    return new Function(`${source}; return ${name};`)();
+  }
+
+  test("computeCastlingAvailability requires the king AND rook both on their home square", async () => {
+    const result: any = await fenWidget("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "TestPage");
+    const compute = extractFunction(result.script, "computeCastlingAvailability");
+
+    expect(compute({ e1: "wK", h1: "wR", a1: "wR", e8: "bK", h8: "bR", a8: "bR" })).toEqual({
+      K: true,
+      Q: true,
+      k: true,
+      q: true,
+    });
+    // h1 rook missing -> only White kingside is lost.
+    expect(compute({ e1: "wK", a1: "wR", e8: "bK", h8: "bR", a8: "bR" })).toEqual({
+      K: false,
+      Q: true,
+      k: true,
+      q: true,
+    });
+    // King not on e1 at all -> both White rights lost, Black unaffected.
+    expect(compute({ e2: "wK", h1: "wR", a1: "wR", e8: "bK", h8: "bR", a8: "bR" })).toEqual({
+      K: false,
+      Q: false,
+      k: true,
+      q: true,
+    });
+    expect(compute({})).toEqual({ K: false, Q: false, k: false, q: false });
+  });
+
+  test("computeEnPassantCandidates only offers a square behind an opposing pawn that could have just double-stepped", async () => {
+    const result: any = await fenWidget("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "TestPage");
+    const compute = extractFunction(result.script, "computeEnPassantCandidates");
+
+    // White to move: black pawn on e5, e6/e7 empty -> e6 is a candidate.
+    expect(compute({ e5: "bP" }, "w")).toEqual(["e6"]);
+    // e7 occupied -> the pawn couldn't have come from there, no candidate.
+    expect(compute({ e5: "bP", e7: "bP" }, "w")).toEqual([]);
+    // e6 (the target square itself) occupied -> not a candidate either.
+    expect(compute({ e5: "bP", e6: "wP" }, "w")).toEqual([]);
+    // Black to move: white pawn on d4, d2/d3 empty -> d3 is a candidate.
+    expect(compute({ d4: "wP" }, "b")).toEqual(["d3"]);
+    // Nothing set up -> no candidates.
+    expect(compute({}, "w")).toEqual([]);
+    // Two independent double-steps -> both offered (a legitimate ambiguity
+    // an editor can't resolve from a static board alone).
+    expect(compute({ a5: "bP", h5: "bP" }, "w")).toEqual(["a6", "h6"]);
   });
 
   test("pgnWidget parses PGN header, moves, and generates move tree", async () => {
