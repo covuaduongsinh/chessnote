@@ -33,6 +33,70 @@ export const realSpaceOps: SpaceOps = {
 };
 
 /**
+ * `client_bundle/base_fs/` has exactly two top-level directories --
+ * `Library/` and `Repositories/` -- and BOTH are entirely the server's
+ * baked-in read-only content (served through the Fallthrough merge with
+ * this Space's real files). No genuine user file should ever live at a
+ * path starting with either prefix.
+ *
+ * Excluded unconditionally by path prefix, NOT just when `perm === "ro"`:
+ * sự cố 2026-09-13 (bản vá `perm`-only ngày 2026-09-12 dừng được vòng lặp
+ * cho `Library/Std/Plugs/*.plug.js`, nhưng vài trang tài liệu/mẫu cụ thể
+ * khác dưới `Library/` -- `Library/Std`, `Library/Std/APIs/Action Button`,
+ * `Library/Chess/Templates/Opening_Repertoire` -- vẫn tiếp tục bị coi là
+ * "xung đột" lặp lại dù không có file thật nào trên đĩa (`find` xác nhận
+ * `Library/Std` hoàn toàn trống ngoài các file `.conflict-*.md` do chính
+ * lỗi này tạo ra) -- nguyên nhân chính xác vì sao `perm` không nhất quán
+ * "ro" cho đúng những path này chưa xác định được dứt điểm; loại trừ theo
+ * tiền tố đường dẫn là lớp phòng thủ độc lập, không phụ thuộc vào việc
+ * server báo `perm` đúng hay không cho từng file nhúng cứng.
+ */
+const BAKED_IN_PREFIXES = ["Library/", "Repositories/"];
+function isBakedIn(path: string): boolean {
+  return BAKED_IN_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+/**
+ * Bộ phạm vi đồng bộ dùng chung giữa `performSync()` và `diagnoseSync()` --
+ * trước đây mỗi hàm tự xây riêng `readOnlyPaths`/`localMap`/`allPaths`
+ * (trùng lặp logic, dễ để 2 bản lệch nhau khi sửa 1 chỗ quên chỗ kia).
+ */
+function computeSyncScope(
+  localFiles: FileMeta[],
+  remoteEntries: RemoteFileEntry[],
+  state: SyncState,
+  stateFilePath: string,
+) {
+  // `space.listFiles()` returns the Fallthrough-merged listing (real Space
+  // files + the server's read-only baked-in Library/Repositories content,
+  // perm: "ro") -- not just this Space's own content. Those paths aren't
+  // ours to sync: excluded entirely (not just from localMap) so they're
+  // never uploaded, downloaded, reported as a conflict, or hit the
+  // server's write-guard for fallback-only paths. Same `perm` check
+  // already used by plugs/configuration-manager/libraries.ts's roguePlugs
+  // filter; `isBakedIn()` above is the additional path-prefix layer.
+  const excluded = new Set(
+    localFiles.filter((f) => f.perm === "ro" || isBakedIn(f.name)).map((f) => f.name),
+  );
+  const localMap = new Map(
+    localFiles
+      .filter((f) => f.name !== stateFilePath && !excluded.has(f.name) && !isBakedIn(f.name))
+      .map((f) => [f.name, f]),
+  );
+  const remoteMap = new Map<string, RemoteFileEntry>();
+  for (const e of remoteEntries) {
+    if (!e.deleted) remoteMap.set(e.path, e);
+  }
+  // Đường dẫn từng có mặt (local, remote hiện tại, hoặc trong state cũ).
+  const allPaths = new Set<string>(
+    [...localMap.keys(), ...remoteMap.keys(), ...Object.keys(state)].filter(
+      (p) => !excluded.has(p) && !isBakedIn(p),
+    ),
+  );
+  return { excluded, localMap, remoteMap, allPaths };
+}
+
+/**
  * Mỗi provider giữ file trạng thái riêng — QUAN TRỌNG khi có >1 provider cấu
  * hình cùng lúc trên cùng Space (Dropbox + WebDAV): dùng chung 1 file sẽ làm
  * provider này ghi đè state của provider kia, khiến `localChanged`/
@@ -161,22 +225,11 @@ export async function diagnoseSync(
     provider.listEntries(folder),
   ]);
 
-  const readOnlyPaths = new Set(
-    localFiles.filter((f) => f.perm === "ro").map((f) => f.name),
-  );
-  const localMap = new Map(
-    localFiles
-      .filter((f) => f.name !== stateFilePath && !readOnlyPaths.has(f.name))
-      .map((f) => [f.name, f]),
-  );
-  const remoteMap = new Map<string, RemoteFileEntry>();
-  for (const e of remoteEntries) {
-    if (!e.deleted) remoteMap.set(e.path, e);
-  }
-  const allPaths = new Set<string>(
-    [...localMap.keys(), ...remoteMap.keys(), ...Object.keys(state)].filter(
-      (p) => !readOnlyPaths.has(p),
-    ),
+  const { localMap, remoteMap, allPaths } = computeSyncScope(
+    localFiles,
+    remoteEntries,
+    state,
+    stateFilePath,
   );
 
   const out: SyncDiagnosis[] = [];
@@ -212,32 +265,11 @@ export async function performSync(
     provider.listEntries(folder),
   ]);
 
-  // `space.listFiles()` returns the Fallthrough-merged listing (real Space
-  // files + the server's read-only baked-in Library/Std, perm: "ro" — see
-  // server-common/src/space/embed.rs) — not just this Space's own content.
-  // Those paths aren't ours to sync: excluded entirely (not just from
-  // localMap) so they're never uploaded, downloaded, reported as a conflict,
-  // or hit the server's write-guard for fallback-only paths. Same `perm`
-  // check already used by plugs/configuration-manager/libraries.ts's
-  // roguePlugs filter.
-  const readOnlyPaths = new Set(
-    localFiles.filter((f) => f.perm === "ro").map((f) => f.name),
-  );
-
-  const localMap = new Map(
-    localFiles
-      .filter((f) => f.name !== stateFilePath && !readOnlyPaths.has(f.name))
-      .map((f) => [f.name, f]),
-  );
-  const remoteMap = new Map<string, RemoteFileEntry>();
-  for (const e of remoteEntries) {
-    if (!e.deleted) remoteMap.set(e.path, e);
-  }
-  // Đường dẫn từng có mặt (local, remote hiện tại, hoặc trong state cũ).
-  const allPaths = new Set<string>(
-    [...localMap.keys(), ...remoteMap.keys(), ...Object.keys(state)].filter(
-      (p) => !readOnlyPaths.has(p),
-    ),
+  const { excluded, localMap, remoteMap, allPaths } = computeSyncScope(
+    localFiles,
+    remoteEntries,
+    state,
+    stateFilePath,
   );
 
   const report: SyncReport = {
@@ -258,11 +290,16 @@ export async function performSync(
   // thời hạn — xem dropbox_sync.ts) làm mất sạch mọi tiến độ đã thực sự
   // thành công trên remote, khiến lần sau lặp lại đúng conflict cũ vô ích.
   const nextState: SyncState = { ...state };
-  // readOnlyPaths không bao giờ lọt vào allPaths (đã lọc ở trên) nên vòng lặp
-  // dưới không đụng tới key của chúng — phải tự dọn ở đây, nếu không bản copy
-  // sẽ giữ mãi các key rác này thay vì tự loại như hành vi cũ (nextState
-  // từng bắt đầu rỗng nên luôn tự bỏ qua chúng).
-  for (const p of readOnlyPaths) delete nextState[p];
+  // Paths excluded from allPaths (perm: "ro" or under Library/Repositories)
+  // never get touched by the loop below -- clean them out of the copied
+  // state here, otherwise they'd persist forever instead of being dropped
+  // like they were when nextState used to start empty. Checking `isBakedIn`
+  // too (not just `excluded`, which only reflects this run's `localFiles`)
+  // catches any stale state entry left over for a baked-in path that
+  // doesn't currently show up in the listing at all.
+  for (const p of Object.keys(nextState)) {
+    if (excluded.has(p) || isBakedIn(p)) delete nextState[p];
+  }
 
   for (const path of allPaths) {
     try {

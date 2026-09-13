@@ -236,6 +236,40 @@ describe("performSync (generic, over any SyncProvider)", () => {
     expect(savedState["Library/Std/Config.md"]).toBeUndefined();
   });
 
+  test("ignores anything under Library/ or Repositories/ by path prefix alone, even when perm isn't reported as \"ro\"", async () => {
+    // Sự cố 2026-09-13: vài trang cụ thể dưới Library/ (không phải .plug.js)
+    // vẫn bị coi là "xung đột" lặp lại dù không có file thật nào trên đĩa --
+    // `perm` không nhất quán báo "ro" cho đúng những path này vì lý do chưa
+    // xác định được dứt điểm. `space.put()` (không phải `putReadOnly()`) mô
+    // phỏng đúng tình huống đó: file có mặt trong listFiles() với perm mặc
+    // định "rw", CHỈ đường dẫn là dấu hiệu duy nhất cho biết nó là nội dung
+    // nhúng cứng.
+    const space = new FakeSpace();
+    space.put("Library/Std/APIs/Action Button.md", "baked-in content");
+    space.put("Repositories/some-repo/README.md", "baked-in content");
+    provider.seedRemote("Library/Std/APIs/Action Button.md", "stray old copy", "rev1");
+    provider.seedRemote("Repositories/some-repo/README.md", "stray old copy", "rev1");
+    space.put(
+      "_sync/fake-state.json",
+      JSON.stringify({
+        "Library/Std/APIs/Action Button.md": { localMtime: 100, remoteRev: "rev0" },
+        "Repositories/some-repo/README.md": { localMtime: 100, remoteRev: "rev0" },
+      }),
+    );
+
+    const report = await performSync(provider, "", space);
+
+    expect(report).toMatchObject({
+      uploaded: [],
+      downloaded: [],
+      conflicts: [],
+      errors: [],
+    });
+    const savedState = JSON.parse(dec(await space.readFile("_sync/fake-state.json")));
+    expect(savedState["Library/Std/APIs/Action Button.md"]).toBeUndefined();
+    expect(savedState["Repositories/some-repo/README.md"]).toBeUndefined();
+  });
+
   test("downloads a brand-new remote file into an empty space", async () => {
     const space = new FakeSpace();
     provider.seedRemote("new.md", "from remote", "rev1");
