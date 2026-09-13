@@ -21,6 +21,27 @@ globalThis.syscall = async (name, ...args) => {
   });
 };
 
+// Lets a widget's own script write its (possibly edited) content back into
+// the page's source -- e.g. the chess FEN widget's board editor. \`oldText\`
+// is what the widget believes the fence body currently holds; the parent
+// (iframe_widget.ts) only applies \`newText\` if that still matches the real
+// document, otherwise it rejects instead of silently overwriting a change
+// made elsewhere in the meantime.
+let replaceBodyReqId = 0;
+const pendingReplaceBody = new Map();
+globalThis.replaceWidgetBody = async (oldText, newText) => {
+  return await new Promise((resolve, reject) => {
+    replaceBodyReqId++;
+    pendingReplaceBody.set(replaceBodyReqId, { resolve, reject });
+    globalThis.parent.postMessage({
+      type: "replaceBody",
+      id: replaceBodyReqId,
+      oldText,
+      newText,
+    }, "*");
+  });
+};
+
 let oldHeight = undefined;
 let heightChecks = 0;
 let resizeObserver = undefined;
@@ -80,6 +101,18 @@ globalThis.addEventListener("message", (message) => {
         }
       }
 
+      break;
+    case "replaceBody-response":
+      {
+        const lookup = pendingReplaceBody.get(data.id);
+        if (!lookup) break;
+        pendingReplaceBody.delete(data.id);
+        if (data.error) {
+          lookup.reject(new Error(data.error));
+        } else {
+          lookup.resolve(data.result);
+        }
+      }
       break;
     case "theme":
       if (data.theme) {

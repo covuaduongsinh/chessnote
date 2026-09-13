@@ -154,6 +154,29 @@ describe("Chess Plug Unit Tests", () => {
     expect(compute({ a5: "bP", h5: "bP" }, "w")).toEqual(["a6", "h6"]);
   });
 
+  test("buildSavedBodyText replaces only the FEN line, preserving every other line untouched", async () => {
+    const result: any = await fenWidget("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "TestPage");
+    const build = extractFunction(result.script, "buildSavedBodyText");
+
+    const newFen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1";
+
+    // Bare single-line fence (the common case).
+    expect(
+      build("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", newFen),
+    ).toBe(newFen);
+
+    // Option lines below the FEN (title/orientation/etc.) must survive untouched.
+    const withOptions = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1\n| title: My position\n| orientation: black";
+    expect(
+      build(withOptions, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", newFen),
+    ).toBe(`${newFen}\n| title: My position\n| orientation: black`);
+
+    // A leading blank line before the FEN: the FEN line is found by content
+    // match, not by assuming index 0.
+    expect(build(`\n${"start"}`.replace("start", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"), "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", newFen))
+      .toBe(`\n${newFen}`);
+  });
+
   test("pgnWidget parses PGN header, moves, and generates move tree", async () => {
     const pgn = `[Event "World Championship 2024"]
 [White "Ding, Liren"]

@@ -283,6 +283,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
         <button class="chess-btn" id="${widgetId}_flip">🔄 Flip</button>
         <button class="chess-btn" id="${widgetId}_reset">⏮ Reset</button>
         <button class="chess-btn" id="${widgetId}_copy_fen">📋 Copy FEN</button>
+        <button class="chess-btn" id="${widgetId}_save_page" title="Ghi vị trí hiện tại vào khối code này trong trang -- không tự động, bấm khi muốn giữ lại thay đổi (nước đi hoặc sửa bàn cờ)">💾 Lưu vào trang</button>
         <button class="chess-btn" id="${widgetId}_lichess">🔍 Lichess Analysis</button>
       </div>
       <div class="chess-edit-panel" id="${widgetId}_edit_panel" style="display: none;">
@@ -335,6 +336,13 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   const BOARD_THEMES = ${JSON.stringify(BOARD_THEMES)};
   const initialFen = ${JSON.stringify(fen)};
   let currentFen = initialFen;
+  // Full original fence body (FEN line + any "| option: ..." lines below it,
+  // exactly as they appear in the page) -- kept so "Lưu vào trang" only ever
+  // replaces the FEN line, never silently dropping orientation/title/arrows/
+  // highlights/pieceSet/boardTheme lines a page author wrote by hand.
+  const initialBodyText = ${JSON.stringify(bodyText)};
+  let lastKnownBodyText = initialBodyText;
+  let lastSavedFen = initialFen;
   let orientation = ${JSON.stringify(orientation)};
   const baseArrows = ${JSON.stringify(arrows)};
   const highlights = ${JSON.stringify(highlights)};
@@ -392,6 +400,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   const flipBtn = document.getElementById("${widgetId}_flip");
   const resetBtn = document.getElementById("${widgetId}_reset");
   const copyFenBtn = document.getElementById("${widgetId}_copy_fen");
+  const savePageBtn = document.getElementById("${widgetId}_save_page");
   const lichessBtn = document.getElementById("${widgetId}_lichess");
   const evalToggleBtn = document.getElementById("${widgetId}_eval_toggle");
   const evalBarEl = document.getElementById("${widgetId}_eval_bar");
@@ -1194,6 +1203,50 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     copyFenBtn.innerText = "✓ Copied!";
     setTimeout(() => { copyFenBtn.innerText = "📋 Copy FEN"; }, 1500);
   });
+
+  // Rebuilds the fence body to write back: only the FEN line changes, every
+  // other line (title/orientation/arrows/highlights/pieceSet/boardTheme
+  // "| ..." lines, or any blank lines) is carried over untouched. Finds the
+  // FEN line by matching oldFen's own text rather than assuming index 0,
+  // since a page author could have left leading blank lines.
+  function buildSavedBodyText(bodyText, oldFen, newFen) {
+    const lines = bodyText.split("\\n");
+    let idx = lines.findIndex((l) => l.trim() === oldFen);
+    if (idx === -1) {
+      idx = lines.findIndex((l) => l.trim().length > 0);
+      if (idx === -1) idx = 0;
+    }
+    const next = lines.slice();
+    next[idx] = newFen;
+    return next.join("\\n");
+  }
+
+  if (savePageBtn) {
+    savePageBtn.addEventListener("click", async () => {
+      const newBodyText = buildSavedBodyText(lastKnownBodyText, lastSavedFen, currentFen);
+      if (newBodyText === lastKnownBodyText) return; // nothing to save
+      if (typeof globalThis.replaceWidgetBody !== "function") {
+        showError("Không lưu được: sandbox này chưa hỗ trợ ghi ngược vào trang.");
+        return;
+      }
+      savePageBtn.disabled = true;
+      const originalLabel = savePageBtn.innerText;
+      savePageBtn.innerText = "Đang lưu...";
+      try {
+        await globalThis.replaceWidgetBody(lastKnownBodyText, newBodyText);
+        lastKnownBodyText = newBodyText;
+        lastSavedFen = currentFen;
+        showError(null);
+        savePageBtn.innerText = "✅ Đã lưu";
+      } catch (e) {
+        showError("Không lưu được vào trang: " + e.message);
+        savePageBtn.innerText = originalLabel;
+      } finally {
+        savePageBtn.disabled = false;
+        setTimeout(() => { savePageBtn.innerText = "💾 Lưu vào trang"; }, 1500);
+      }
+    });
+  }
 
   lichessBtn.addEventListener("click", () => {
     const url = "https://lichess.org/analysis/" + encodeURIComponent(currentFen.replace(/ /g, "_"));

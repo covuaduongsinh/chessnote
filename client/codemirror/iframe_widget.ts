@@ -1,6 +1,7 @@
 import { WidgetType } from "@codemirror/view";
 import type { Client } from "../client.ts";
 import { createWidgetSandboxIFrame } from "../components/widget_sandbox_iframe.ts";
+import { findFencedCodeBodyRange } from "./fenced_code_body_range.ts";
 import type {
   CodeWidgetCallback,
   CodeWidgetContent,
@@ -75,6 +76,52 @@ export class IFrameWidget extends WidgetType {
               }
             });
             break;
+          case "replaceBody": {
+            // A widget asking to write its own (possibly edited) content
+            // back into the page's source -- see findFencedCodeBodyRange
+            // above for why this re-resolves the range fresh rather than
+            // trusting a position captured when the widget was built.
+            const { id, oldText, newText } = message;
+            const respond = (result: unknown, error?: string) =>
+              iframe.contentWindow?.postMessage({
+                type: "replaceBody-response",
+                id,
+                result,
+                error,
+              });
+            try {
+              const pos = this.client.editorView.posAtDOM(iframe, 0);
+              const range = findFencedCodeBodyRange(
+                this.client.editorView.state,
+                pos,
+              );
+              if (!range) {
+                respond(
+                  undefined,
+                  "Không tìm thấy khối code chứa widget này trong trang.",
+                );
+                break;
+              }
+              const current = this.client.editorView.state.sliceDoc(
+                range.from,
+                range.to,
+              );
+              if (current !== oldText) {
+                respond(
+                  undefined,
+                  "Nội dung trang đã thay đổi kể từ khi widget này được tải -- tải lại trang rồi lưu lại.",
+                );
+                break;
+              }
+              this.client.editorView.dispatch({
+                changes: { from: range.from, to: range.to, insert: newText },
+              });
+              respond(true);
+            } catch (e) {
+              respond(undefined, (e as Error).message);
+            }
+            break;
+          }
         }
       },
     );
