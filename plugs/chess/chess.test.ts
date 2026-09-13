@@ -177,6 +177,47 @@ describe("Chess Plug Unit Tests", () => {
       .toBe(`\n${newFen}`);
   });
 
+  test("placeEditPiece/eraseEditPiece/moveEditPiece are pure board-mutation helpers shared by click and drag-and-drop", async () => {
+    const result: any = await fenWidget("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "TestPage");
+    const place = extractFunction(result.script, "placeEditPiece");
+    const erase = extractFunction(result.script, "eraseEditPiece");
+    const move = extractFunction(result.script, "moveEditPiece");
+
+    const board = { e1: "wK", h1: "wR", e8: "bK" };
+
+    // placeEditPiece: adds/overwrites the target square, leaves everything
+    // else and the original object untouched (returns a new object).
+    expect(place(board, "a1", "wQ")).toEqual({ e1: "wK", h1: "wR", e8: "bK", a1: "wQ" });
+    expect(place(board, "e1", "bQ")).toEqual({ e1: "bQ", h1: "wR", e8: "bK" });
+    expect(board).toEqual({ e1: "wK", h1: "wR", e8: "bK" });
+
+    // eraseEditPiece: removes only the target square; erasing an empty
+    // square is a harmless no-op.
+    expect(erase(board, "h1")).toEqual({ e1: "wK", e8: "bK" });
+    expect(erase(board, "a1")).toEqual(board);
+
+    // moveEditPiece: relocates whatever is on `from` to `to`, overwriting
+    // any piece already at `to`, and clears `from` (key fully removed, not
+    // just set to undefined).
+    expect(move(board, "e1", "e8")).toEqual({ h1: "wR", e8: "wK" });
+    expect(Object.keys(move(board, "e1", "e8"))).not.toContain("e1");
+  });
+
+  test("fenWidget's board-editor script wires up drag-and-drop (board move, palette placement, drag-off-board erase)", async () => {
+    const result: any = await fenWidget("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "TestPage");
+    // Coarse markers -- a future refactor that accidentally drops this
+    // wiring should fail here even without a DOM to actually simulate drag
+    // events (this project has no jsdom, see extractFunction's comment).
+    expect(result.script).toContain("dragstart");
+    expect(result.script).toContain("dragend");
+    expect(result.script).toContain("dragover");
+    expect(result.script).toContain("drop-target");
+    expect(result.script).toContain("dragSource");
+    // Still parses cleanly as a full script (same smoke check used elsewhere
+    // in this file for the generated widget script).
+    expect(() => new Function(result.script)).not.toThrow();
+  });
+
   test("pgnWidget parses PGN header, moves, and generates move tree", async () => {
     const pgn = `[Event "World Championship 2024"]
 [White "Ding, Liren"]

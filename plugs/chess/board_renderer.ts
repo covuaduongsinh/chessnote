@@ -304,6 +304,23 @@ html, body {
   transition: transform 0.1s ease;
 }
 
+/* Board editor drag-and-drop (see chess.ts renderBoard()/renderEditPalette()).
+   A draggable piece needs pointer-events re-enabled to receive the mousedown
+   that starts a drag -- a plain click on it still bubbles up to the square's
+   own click listener exactly as before, so the click-to-move/armed-tool
+   flows are unaffected. */
+.chess-piece[draggable="true"] {
+  pointer-events: auto;
+  cursor: grab;
+}
+.chess-piece.dragging {
+  opacity: 0.35;
+}
+.chess-sq.drop-target {
+  outline: 2px dashed var(--sq-highlight);
+  outline-offset: -2px;
+}
+
 .chess-coord {
   position: absolute;
   font-size: 10px;
@@ -538,7 +555,7 @@ html, body {
   border: 2px solid transparent;
   border-radius: 6px;
   padding: 2px;
-  cursor: pointer;
+  cursor: grab;
   display: flex;
   align-items: center;
   justify-content: center;

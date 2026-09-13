@@ -365,6 +365,14 @@ export async function fenWidget(bodyText: string, _pageName: string) {
   let isBusy = false; // true while a move syscall round-trip is in flight
   let editMode = false;
   let armedTool = null; // null | "erase" | "wP" | "wN" | "wB" | "wR" | "wQ" | "wK" | "b..."
+  // Drag-and-drop state for edit mode -- an independent input path alongside
+  // armedTool/selectedSquare (see handleEditSquareClick), not a replacement.
+  // dragSource is null | {sq} (a piece already on the board) | {paletteKey}
+  // (a piece being dragged from the palette). dragHandled tracks whether some
+  // square's "drop" already consumed the current drag, so pieceDiv's dragend
+  // knows whether the piece was dropped outside any square (-> erase it).
+  let dragSource = null;
+  let dragHandled = false;
   let wasEngineOnBeforeEdit = false; // to restore Engine Eval state after leaving edit mode
   // Pre-existing bug (present since the board-editor commit, unrelated to
   // castling/en-passant work): this MUST be declared before the initial
@@ -716,12 +724,47 @@ export async function fenWidget(bodyText: string, _pageName: string) {
         updateEraseBtnState();
         renderBoard();
       });
+      // Drag this spare piece straight onto a board square to place it --
+      // an alternative to arming it via click above, dropped by the target
+      // square's "drop" handler in renderBoard().
+      btn.draggable = true;
+      btn.addEventListener("dragstart", (e) => {
+        dragSource = { paletteKey: key };
+        dragHandled = false;
+        e.dataTransfer.effectAllowed = "copy";
+        e.dataTransfer.setData("text/plain", key);
+      });
+      btn.addEventListener("dragend", () => {
+        dragSource = null;
+      });
       editPaletteEl.appendChild(btn);
     });
   }
 
   function updateEraseBtnState() {
     if (editEraseBtn) editEraseBtn.classList.toggle("armed", armedTool === "erase");
+  }
+
+  // Pure board-mutation helpers for edit mode -- shared by the click-based
+  // interactions below AND the drag-and-drop wiring in renderBoard()/
+  // renderEditPalette(), so both input styles always stay in sync (fix one,
+  // both change). Each returns a NEW boardMap rather than mutating in place.
+  function placeEditPiece(boardMap, sq, pieceKey) {
+    const next = Object.assign({}, boardMap);
+    next[sq] = pieceKey;
+    return next;
+  }
+  function eraseEditPiece(boardMap, sq) {
+    const next = Object.assign({}, boardMap);
+    delete next[sq];
+    return next;
+  }
+  function moveEditPiece(boardMap, fromSq, toSq) {
+    const next = Object.assign({}, boardMap);
+    const moved = next[fromSq];
+    delete next[fromSq];
+    next[toSq] = moved;
+    return next;
   }
 
   function handleEditSquareClick(sq, boardState) {
@@ -731,9 +774,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     // square, overwriting anything already there. Deliberately allows
     // transient illegal states (e.g. 2 kings of the same color mid-swap).
     if (armedTool && armedTool !== "erase") {
-      const boardMap = Object.assign({}, boardState);
-      boardMap[sq] = armedTool;
-      commitEditedBoard(boardMap, activeColor);
+      commitEditedBoard(placeEditPiece(boardState, sq, armedTool), activeColor);
       return;
     }
 
@@ -741,9 +782,7 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     // clicked square. No-op on an empty square.
     if (armedTool === "erase") {
       if (!boardState[sq]) return;
-      const boardMap = Object.assign({}, boardState);
-      delete boardMap[sq];
-      commitEditedBoard(boardMap, activeColor);
+      commitEditedBoard(eraseEditPiece(boardState, sq), activeColor);
       return;
     }
 
@@ -751,17 +790,15 @@ export async function fenWidget(bodyText: string, _pageName: string) {
     // square selects it (any color, any piece, no turn restriction), second
     // click on ANY square (occupied or not) relocates it there, overwriting
     // whatever was on the destination. Click-select-click mirrors the
-    // existing play-mode pattern instead of HTML5 drag-and-drop.
+    // existing play-mode pattern; drag-and-drop (see renderBoard()) offers
+    // the same relocation in a single gesture for mouse users.
     if (selectedSquare === sq) {
       selectedSquare = null;
       renderBoard();
       return;
     }
     if (selectedSquare) {
-      const boardMap = Object.assign({}, boardState);
-      const moved = boardMap[selectedSquare];
-      delete boardMap[selectedSquare];
-      boardMap[sq] = moved;
+      const boardMap = moveEditPiece(boardState, selectedSquare, sq);
       selectedSquare = null;
       commitEditedBoard(boardMap, activeColor);
       return;
@@ -986,6 +1023,29 @@ export async function fenWidget(bodyText: string, _pageName: string) {
         if (highlights[sq]) {
           sqDiv.classList.add("highlight");
         }
+        if (editMode) {
+          // Drop target for a piece being dragged (from the board or the
+          // palette) -- see dragstart above and renderEditPalette() below.
+          sqDiv.addEventListener("dragover", (e) => {
+            e.preventDefault(); // required for "drop" to fire at all
+            sqDiv.classList.add("drop-target");
+          });
+          sqDiv.addEventListener("dragleave", () => {
+            sqDiv.classList.remove("drop-target");
+          });
+          sqDiv.addEventListener("drop", (e) => {
+            e.preventDefault();
+            sqDiv.classList.remove("drop-target");
+            dragHandled = true;
+            const activeColor = editTurnB && editTurnB.checked ? "b" : "w";
+            if (dragSource && dragSource.sq) {
+              commitEditedBoard(moveEditPiece(boardState, dragSource.sq, sq), activeColor);
+            } else if (dragSource && dragSource.paletteKey) {
+              commitEditedBoard(placeEditPiece(boardState, sq, dragSource.paletteKey), activeColor);
+            }
+            dragSource = null;
+          });
+        }
         if (destSquares[sq]) {
           sqDiv.classList.add("dest");
           if (boardState[sq]) sqDiv.classList.add("has-piece");
@@ -996,6 +1056,28 @@ export async function fenWidget(bodyText: string, _pageName: string) {
           const pieceDiv = document.createElement("div");
           pieceDiv.className = "chess-piece";
           pieceDiv.innerHTML = currentPieces[piece] || "";
+          if (editMode) {
+            // Pick this piece up and drag it: to another square (-> move),
+            // or off the board entirely (-> erase, see dragend below). An
+            // additional input path alongside the click-to-move/armed-tool
+            // flows in handleEditSquareClick -- not a replacement for them.
+            pieceDiv.draggable = true;
+            pieceDiv.addEventListener("dragstart", (e) => {
+              dragSource = { sq: sq };
+              dragHandled = false;
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", sq);
+              pieceDiv.classList.add("dragging");
+            });
+            pieceDiv.addEventListener("dragend", () => {
+              pieceDiv.classList.remove("dragging");
+              if (dragSource && dragSource.sq && !dragHandled) {
+                const activeColor = editTurnB && editTurnB.checked ? "b" : "w";
+                commitEditedBoard(eraseEditPiece(boardState, dragSource.sq), activeColor);
+              }
+              dragSource = null;
+            });
+          }
           sqDiv.appendChild(pieceDiv);
         }
 
