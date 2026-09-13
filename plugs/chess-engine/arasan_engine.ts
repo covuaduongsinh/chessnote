@@ -74,6 +74,22 @@ export interface EngineResult {
 }
 
 let cachedBytes: { wasm: Uint8Array; nnue: Uint8Array } | null = null;
+// Giai đoạn 3.1 (2026-09-13): trước đây mỗi evalPosition() gọi
+// `WebAssembly.instantiate(wasm, imports)` với `wasm` là BYTES thô -- overload
+// này COMPILE LẠI TỪ ĐẦU mỗi lần (decode + validate + JIT toàn bộ ~925KB)
+// dù bytes đã được cache. Cache thêm `WebAssembly.Module` đã compile 1 lần,
+// dùng overload `instantiate(module, imports)` (chỉ link, không compile lại)
+// cho mọi lần gọi sau -- giảm CPU mỗi nước đi khi "Engine Eval" bật, không đổi
+// gì về hành vi/kết quả UCI. KHÔNG cache/tái dùng `instance` hay virtual FS
+// (mỗi lần vẫn tạo instance mới, vẫn ghi lại NNUE ~25MB) -- đó là thay đổi
+// kiến trúc vòng đời lớn hơn, cố ý để lại cho một lần đánh giá riêng.
+let cachedModule: WebAssembly.Module | null = null;
+
+async function getCompiledModule(wasm: Uint8Array): Promise<WebAssembly.Module> {
+  if (cachedModule) return cachedModule;
+  cachedModule = await WebAssembly.compile(wasm as BufferSource);
+  return cachedModule;
+}
 
 async function getEngineBytes(): Promise<{
   wasm: Uint8Array;
@@ -171,12 +187,11 @@ export async function evalPosition(
   const instance: any = await ArasanModule({
     // deno-lint-ignore no-explicit-any
     instantiateWasm(imports: WebAssembly.Imports, successCallback: any) {
-      (
-        WebAssembly.instantiate(
-          wasm,
-          imports,
-        ) as unknown as Promise<WebAssembly.WebAssemblyInstantiatedSource>
-      ).then((output) => successCallback(output.instance, output.module));
+      getCompiledModule(wasm).then((module) =>
+        (
+          WebAssembly.instantiate(module, imports) as unknown as Promise<WebAssembly.Instance>
+        ).then((instance) => successCallback(instance, module)),
+      );
       return {};
     },
     print: (text: string) => outputLines.push(text),
