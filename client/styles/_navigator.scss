@@ -267,6 +267,20 @@
   color: var(--sb-nav-muted);
 }
 
+// A capped tree folder's "show N more" row -- unlike `.sb-nav-more` above
+// (the filtered list's non-interactive "keep typing" hint), this one is
+// deliberately clickable.
+.sb-nav-show-more {
+  cursor: pointer;
+  justify-content: center;
+  font-size: 0.8em;
+  color: var(--sb-nav-muted);
+}
+
+.sb-nav-show-more:hover {
+  text-decoration: underline;
+}
+
 .sb-nav-create {
   border-top: 1px solid var(--ui-surface-border-color);
 }

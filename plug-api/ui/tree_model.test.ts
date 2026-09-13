@@ -7,9 +7,11 @@ import {
   computeTreeDisplay,
   findNode,
   flattenVisible,
+  childIndexContaining,
   nodeObject,
   planMove,
   pruneTree,
+  visibleChildren,
   withExpanded,
 } from "./tree_model.ts";
 
@@ -334,6 +336,80 @@ test("withExpanded expands under either reading", () => {
 test("allNodes walks the whole tree, root excluded", () => {
   const root = buildTree([row("A/B/C"), row("D")], "/", true);
   expect(allNodes(root).map((n) => n.path)).toEqual(["A", "A/B", "A/B/C", "D"]);
+});
+
+test("visibleChildren shows everything unchanged when under the cap", () => {
+  const items = [1, 2, 3];
+  expect(visibleChildren(items, 0, { limit: 200, step: 200 })).toEqual({
+    shown: items,
+    remaining: 0,
+  });
+});
+
+test("visibleChildren caps at exactly `limit` and reports how many are left", () => {
+  const items = Array.from({ length: 250 }, (_, i) => i);
+  const { shown, remaining } = visibleChildren(items, 0, { limit: 200, step: 200 });
+  expect(shown.length).toBe(200);
+  expect(shown).toEqual(items.slice(0, 200));
+  expect(remaining).toBe(50);
+});
+
+test("visibleChildren: exactly `limit` items shows all of them, no 'show more' row", () => {
+  const items = Array.from({ length: 200 }, (_, i) => i);
+  expect(visibleChildren(items, 0, { limit: 200, step: 200 })).toEqual({
+    shown: items,
+    remaining: 0,
+  });
+});
+
+test("visibleChildren: each revealed batch raises the cap by `step`", () => {
+  const items = Array.from({ length: 550 }, (_, i) => i);
+  expect(visibleChildren(items, 0, { limit: 200, step: 200 }).shown.length).toBe(200);
+  expect(visibleChildren(items, 1, { limit: 200, step: 200 }).shown.length).toBe(400);
+  const third = visibleChildren(items, 2, { limit: 200, step: 200 });
+  expect(third.shown.length).toBe(550); // 600 > 550 total -- everything now shown
+  expect(third.remaining).toBe(0);
+});
+
+test("visibleChildren: mustIncludeIndex forces the cap to cover a selection past the normal limit", () => {
+  const items = Array.from({ length: 250 }, (_, i) => i);
+  // Chưa click "show more" nào (revealedBatches=0), nhưng item #219 phải hiện
+  // vì nó đang được chọn (mô phỏng ArrowDown từ keyboard.ts đưa selection ra
+  // ngoài giới hạn 200 mặc định).
+  const { shown, remaining } = visibleChildren(items, 0, {
+    limit: 200,
+    step: 200,
+    mustIncludeIndex: 219,
+  });
+  expect(shown.length).toBe(220);
+  expect(shown).toContain(219);
+  expect(remaining).toBe(30);
+});
+
+test("visibleChildren: mustIncludeIndex within the existing cap changes nothing", () => {
+  const items = Array.from({ length: 250 }, (_, i) => i);
+  const { shown, remaining } = visibleChildren(items, 0, {
+    limit: 200,
+    step: 200,
+    mustIncludeIndex: 5,
+  });
+  expect(shown.length).toBe(200);
+  expect(remaining).toBe(50);
+});
+
+test("childIndexContaining finds the exact child, or the ancestor of a deeper selection", () => {
+  const children = [{ path: "A" }, { path: "B" }, { path: "C" }];
+  expect(childIndexContaining(children, "B", "/")).toBe(1);
+  expect(childIndexContaining(children, "C/nested/deep", "/")).toBe(2);
+  expect(childIndexContaining(children, "Zzz", "/")).toBe(-1);
+  expect(childIndexContaining(children, undefined, "/")).toBe(-1);
+});
+
+test("childIndexContaining does not false-positive on a sibling whose name is a prefix", () => {
+  // "Chess" is not an ancestor of "Chess2/game.pgn" -- must require the exact
+  // separator boundary, not a raw string prefix match.
+  const children = [{ path: "Chess" }, { path: "Chess2" }];
+  expect(childIndexContaining(children, "Chess2/game.pgn", "/")).toBe(1);
 });
 
 test("nodeObject marks folders and never mutates the row's object", () => {

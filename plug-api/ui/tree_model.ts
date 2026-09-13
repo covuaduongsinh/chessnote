@@ -132,6 +132,63 @@ export function withExpanded(
   return next;
 }
 
+/**
+ * Giai đoạn 3 follow-up (2026-09-13): an unfiltered tree has no global row
+ * cap -- `computeTreeDisplay`'s `truncated` count is deliberately 0 outside
+ * filtering ("an unfiltered tree is bounded by what's expanded", see
+ * `client/navigator/ui/hooks/use_derived.ts`). But a single flat folder with
+ * hundreds/thousands of children (e.g. one PGN file per chess game) still
+ * renders that many real DOM nodes the instant it's expanded -- there is no
+ * virtualization anywhere in this codebase (`react-window`/`tanstack-virtual`
+ * etc. are not dependencies). Capping children PER FOLDER with a "show more"
+ * affordance (see tree_view.tsx) bounds that without a bigger rewrite.
+ */
+export const TREE_CHILDREN_LIMIT = 200;
+export const TREE_CHILDREN_STEP = 200;
+
+/**
+ * `children` actually rendered for one folder level, given how many extra
+ * batches of `step` the user has revealed so far by clicking "show more"
+ * (`revealedBatches`, 0 initially).
+ *
+ * `mustIncludeIndex` (optional): keyboard tree-navigation (`keyboard.ts`'s
+ * `treeKeyDown`) walks `computeTreeDisplay(...).visible` -- the FULL
+ * flattened list, unaware of this per-folder cap -- so ArrowDown/PageDown/End
+ * can set `selectedPath` to a child past what's actually rendered here. If
+ * that happens, the selected row would exist in state but never mount (no
+ * `<TreeItem>` for it), so `revealInClosest` silently fails to scroll to it
+ * and nothing visibly shows as selected. Passing the selected child's index
+ * here (if it's one of `children`, or an ancestor of a deeper selection)
+ * forces the cap to cover it regardless of `revealedBatches`.
+ */
+export function visibleChildren<T>(
+  children: T[],
+  revealedBatches: number,
+  opts: { limit?: number; step?: number; mustIncludeIndex?: number } = {},
+): { shown: T[]; remaining: number } {
+  const limit = opts.limit ?? TREE_CHILDREN_LIMIT;
+  const step = opts.step ?? TREE_CHILDREN_STEP;
+  let cap = limit + revealedBatches * step;
+  if (opts.mustIncludeIndex !== undefined && opts.mustIncludeIndex >= cap) {
+    cap = opts.mustIncludeIndex + 1;
+  }
+  if (children.length <= cap) return { shown: children, remaining: 0 };
+  return { shown: children.slice(0, cap), remaining: children.length - cap };
+}
+
+/** Index of the child (if any) that either IS `path` or is an ancestor of it
+ * -- see `visibleChildren`'s `mustIncludeIndex`. */
+export function childIndexContaining<T extends { path: string }>(
+  children: T[],
+  path: string | undefined,
+  separator: string,
+): number {
+  if (!path) return -1;
+  return children.findIndex(
+    (c) => c.path === path || path.startsWith(c.path + separator),
+  );
+}
+
 export function allFolderPaths(node: TreeNode): Set<string> {
   const out = new Set<string>();
   const walk = (n: TreeNode) => {

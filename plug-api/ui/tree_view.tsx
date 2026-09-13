@@ -4,13 +4,44 @@ import { HoverTracker, resolveHover, useHovered } from "./hover.ts";
 import { Icon } from "./icon.tsx";
 import { RowActions } from "./row_actions.tsx";
 import { revealInClosest } from "./scroll.ts";
-import { allFolderPaths, type TreeNode } from "./tree_model.ts";
+import {
+  allFolderPaths,
+  childIndexContaining,
+  type TreeNode,
+  visibleChildren,
+} from "./tree_model.ts";
 import type { ActionMeta, Decoration, RowStates } from "./tree_types.ts";
 
 /** How long a collapsed folder has to be hovered before it springs open. */
 const SPRING_LOAD_MS = 700;
 
 const DRAG_MIME = "application/x-sb-nav-path";
+
+/** Row shown after a folder's (or the root's) children are capped by
+ * `visibleChildren()` -- click reveals one more batch. Not `.sb-nav-more`
+ * (that class is `pointer-events: none`, used for the filtered list's
+ * non-interactive "keep typing" hint; this row is deliberately clickable). */
+function ShowMoreRow({
+  remaining,
+  depth,
+  onClick,
+}: {
+  remaining: number;
+  depth: number;
+  onClick: () => void;
+}) {
+  return (
+    <li role="none">
+      <div
+        class="sb-nav-row sb-nav-show-more"
+        style={{ paddingLeft: `${depth * 1.2}rem` }}
+        onClick={onClick}
+      >
+        Show {remaining} more
+      </div>
+    </li>
+  );
+}
 
 function Chip({ decoration }: { decoration: Decoration }) {
   return (
@@ -82,6 +113,7 @@ export function TreeView({
   // Mirror of the above, so the drag handlers never read a stale closure.
   const dropRef = useRef<string | undefined>(undefined);
   const springTimer = useRef<number | undefined>(undefined);
+  const [rootRevealed, setRootRevealed] = useState(0);
 
   const folderPaths = useMemo(() => allFolderPaths(tree), [tree]);
 
@@ -206,6 +238,13 @@ export function TreeView({
     return showEmpty ? <div class="sb-nav-empty">No results</div> : null;
   }
 
+  const rootMustInclude = childIndexContaining(tree.children, selectedPath, separator);
+  const { shown: shownRootChildren, remaining: rootRemaining } = visibleChildren(
+    tree.children,
+    rootRevealed,
+    { mustIncludeIndex: rootMustInclude >= 0 ? rootMustInclude : undefined },
+  );
+
   return (
     <ul
       ref={treeRef}
@@ -221,13 +260,14 @@ export function TreeView({
       onPointerOver={(e) => hover.track(e, pathAt)}
       onPointerLeave={() => hover.set(undefined)}
     >
-      {tree.children.map((n) => (
+      {shownRootChildren.map((n) => (
         <TreeItem
           key={n.path}
           node={n}
           depth={0}
           expanded={expanded}
           selectedPath={selectedPath}
+          separator={separator}
           hover={hover}
           dropTarget={dropTarget}
           draggable={canDrag}
@@ -245,6 +285,13 @@ export function TreeView({
           onRowKeyDown={onRowKeyDown}
         />
       ))}
+      {rootRemaining > 0 && (
+        <ShowMoreRow
+          remaining={rootRemaining}
+          depth={0}
+          onClick={() => setRootRevealed((r) => r + 1)}
+        />
+      )}
     </ul>
   );
 }
@@ -254,6 +301,7 @@ function TreeItem({
   depth,
   expanded,
   selectedPath,
+  separator,
   hover,
   dropTarget,
   draggable,
@@ -274,6 +322,7 @@ function TreeItem({
   depth: number;
   expanded: Set<string>;
   selectedPath?: string;
+  separator: string;
   hover: HoverTracker;
   dropTarget?: string;
   draggable: boolean;
@@ -295,8 +344,17 @@ function TreeItem({
   // Unconditional: a hook call behind `selected ||` would change the hook
   // order the moment the selection moved onto this row.
   const hovered = useHovered(hover, node.path);
+  // Also unconditional, same reason -- and cheap even for a leaf/collapsed
+  // folder that never reads `shownChildren`/`childrenRemaining` below.
+  const [childrenRevealed, setChildrenRevealed] = useState(0);
   const decorations = node.row?.decorations ?? [];
   const state = rowState?.byPath?.get(node.path);
+  const childMustInclude = childIndexContaining(node.children, selectedPath, separator);
+  const { shown: shownChildren, remaining: childrenRemaining } = visibleChildren(
+    node.children,
+    childrenRevealed,
+    { mustIncludeIndex: childMustInclude >= 0 ? childMustInclude : undefined },
+  );
 
   return (
     <li
@@ -370,13 +428,14 @@ function TreeItem({
       </div>
       {isExpanded && (
         <ul role="group">
-          {node.children.map((c) => (
+          {shownChildren.map((c) => (
             <TreeItem
               key={c.path}
               node={c}
               depth={depth + 1}
               expanded={expanded}
               selectedPath={selectedPath}
+              separator={separator}
               hover={hover}
               dropTarget={dropTarget}
               draggable={draggable}
@@ -394,6 +453,13 @@ function TreeItem({
               onRowKeyDown={onRowKeyDown}
             />
           ))}
+          {childrenRemaining > 0 && (
+            <ShowMoreRow
+              remaining={childrenRemaining}
+              depth={depth + 1}
+              onClick={() => setChildrenRevealed((r) => r + 1)}
+            />
+          )}
         </ul>
       )}
     </li>
