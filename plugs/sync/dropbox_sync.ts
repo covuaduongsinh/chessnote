@@ -72,6 +72,32 @@ interface TokenResponse {
   error_description?: string;
 }
 
+const FETCH_TIMEOUT_MS = 30_000;
+
+/**
+ * Không có `AbortSignal`/timeout nào từng tồn tại cho `nativeFetch` trong
+ * file này (xác nhận qua rà soát trực tiếp) — nếu kết nối treo (server
+ * không trả lời gì, không phải lỗi 429/401), `await nativeFetch(...)` chờ
+ * VÔ THỜI HẠN, khiến "Chess: Đồng bộ Dropbox" trông như treo im lặng hàng
+ * phút không báo gì (sự cố 2026-09-13). Dùng đúng mẫu `AbortSignal.timeout()`
+ * đã có ở `client/spaces/http_space_primitives.ts` — hết hạn sẽ ném
+ * `DOMException` tên "TimeoutError", bọc lại thành `Error` tiếng Việt rõ
+ * ràng để không bị nuốt im lặng (report.errors/flashNotification đọc thẳng
+ * `.message`).
+ */
+async function timedFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await nativeFetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  } catch (e) {
+    if ((e as { name?: string }).name === "TimeoutError") {
+      throw new Error(
+        `Kết nối tới Dropbox quá thời gian chờ (${FETCH_TIMEOUT_MS / 1000}s) — kiểm tra mạng rồi thử lại.`,
+      );
+    }
+    throw e;
+  }
+}
+
 /** Đổi mã xác thực (người dùng dán tay) lấy access+refresh token. */
 export async function exchangeCodeForTokens(
   appKey: string,
@@ -90,7 +116,7 @@ export async function exchangeCodeForTokens(
   // worker_runtime.ts monkey-patch. KHÔNG mở quyền mới: `sync.plug.yaml` đã
   // có `requiredPermissions: [fetch]` ở cấp plug, người dùng đã đồng ý cho
   // plug này gọi mạng — đây chỉ đổi cơ chế thực thi, không đổi ranh giới quyền.
-  const res = await nativeFetch(TOKEN_URL, {
+  const res = await timedFetch(TOKEN_URL, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -121,7 +147,7 @@ export async function refreshAccessToken(
     client_id: appKey,
   });
   // Xem comment ở exchangeCodeForTokens() — nativeFetch để bỏ qua proxy `/.proxy/`.
-  const res = await nativeFetch(TOKEN_URL, {
+  const res = await timedFetch(TOKEN_URL, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: body.toString(),
@@ -175,7 +201,7 @@ async function apiFetch(
 ): Promise<Response> {
   const tokens = await ensureFreshTokens(deps);
   // Xem comment ở exchangeCodeForTokens() — nativeFetch để bỏ qua proxy `/.proxy/`.
-  const res = await nativeFetch(url, {
+  const res = await timedFetch(url, {
     method: "POST",
     ...init,
     headers: { ...init.headers, authorization: `Bearer ${tokens.accessToken}` },

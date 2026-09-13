@@ -197,3 +197,16 @@ describe("deleteFile", () => {
     await expect(deleteFile(auth, "ChessNote", "a.md")).rejects.toThrow(/Xoá file WebDAV thất bại/);
   });
 });
+
+describe("timedFetch (timeout)", () => {
+  // Đại diện cho cả 7 điểm gọi nativeFetch trong file -- tất cả đều đi qua
+  // cùng 1 helper `timedFetch`, nên chỉ cần kiểm chứng qua 1 hàm công khai.
+  test("a hung connection (AbortSignal.timeout firing) surfaces as a clear Vietnamese timeout error, not a raw DOMException", async () => {
+    (nativeFetch as any).mockRejectedValueOnce(
+      new DOMException("The operation was aborted.", "TimeoutError"),
+    );
+    await expect(listEntriesRecursive(auth, "ChessNote")).rejects.toThrow(
+      /Kết nối tới WebDAV quá thời gian chờ \(30s\)/,
+    );
+  });
+});

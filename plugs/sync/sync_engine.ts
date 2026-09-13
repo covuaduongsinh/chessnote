@@ -248,7 +248,21 @@ export async function performSync(
     conflicts: [],
     errors: [],
   };
-  const nextState: SyncState = {};
+  // Bắt đầu từ BẢN SAO của state cũ (không phải rỗng) rồi cập nhật/xoá từng
+  // key ngay trong vòng lặp + lưu ngay sau mỗi path có thay đổi thật. Nếu bị
+  // ngắt giữa chừng (mạng treo, tab đóng, container restart...), các path ĐÃ
+  // xử lý xong trong lượt này không bị mất khỏi state — chỉ path CHƯA kịp xử
+  // lý mới ảnh hưởng ở lần chạy kế (đúng như bình thường). Trước đây
+  // `nextState` bắt đầu rỗng và chỉ được lưu 1 lần duy nhất ở cuối hàm — một
+  // lượt bị ngắt giữa chừng (ví dụ do `nativeFetch` không có timeout treo vô
+  // thời hạn — xem dropbox_sync.ts) làm mất sạch mọi tiến độ đã thực sự
+  // thành công trên remote, khiến lần sau lặp lại đúng conflict cũ vô ích.
+  const nextState: SyncState = { ...state };
+  // readOnlyPaths không bao giờ lọt vào allPaths (đã lọc ở trên) nên vòng lặp
+  // dưới không đụng tới key của chúng — phải tự dọn ở đây, nếu không bản copy
+  // sẽ giữ mãi các key rác này thay vì tự loại như hành vi cũ (nextState
+  // từng bắt đầu rỗng nên luôn tự bỏ qua chúng).
+  for (const p of readOnlyPaths) delete nextState[p];
 
   for (const path of allPaths) {
     try {
@@ -260,6 +274,10 @@ export async function performSync(
       const remoteChanged = !prior ? Boolean(remote) : remote?.rev !== prior.remoteRev;
 
       if (!local && !remote) {
+        // Xoá + lưu NGAY (không chờ hết vòng lặp) — nếu bị ngắt ở path kế
+        // tiếp, việc "đã quên" path này không bị mất.
+        delete nextState[path];
+        await saveState(spaceOps, stateFilePath, nextState);
         continue; // đã biến mất cả hai bên, không giữ trong state nữa
       }
 
@@ -280,6 +298,7 @@ export async function performSync(
           // Remote đã bị xoá, local không đổi kể từ lần đồng bộ trước -> lan truyền xoá.
           await spaceOps.deleteFile(path);
           report.deletedLocal.push(path);
+          delete nextState[path];
         } else {
           // Remote bị xoá NHƯNG local đã sửa từ đó -> ưu tiên không mất chỉnh sửa, tái tạo trên remote.
           const data = await spaceOps.readFile(path);
@@ -287,6 +306,7 @@ export async function performSync(
           report.uploaded.push(path);
           nextState[path] = { localMtime: local.lastModified, remoteRev: result.rev };
         }
+        await saveState(spaceOps, stateFilePath, nextState);
         continue;
       }
 
@@ -301,6 +321,7 @@ export async function performSync(
           // Local đã bị xoá, remote không đổi kể từ lần đồng bộ trước -> lan truyền xoá.
           await provider.delete(folder, path);
           report.deletedRemote.push(path);
+          delete nextState[path];
         } else {
           // Local bị xoá NHƯNG remote đã sửa từ đó -> ưu tiên không mất chỉnh sửa, tải lại về local.
           const dl = await provider.download(folder, path);
@@ -308,6 +329,7 @@ export async function performSync(
           report.downloaded.push(path);
           nextState[path] = { localMtime: meta.lastModified, remoteRev: dl.rev };
         }
+        await saveState(spaceOps, stateFilePath, nextState);
         continue;
       }
 
@@ -332,6 +354,7 @@ export async function performSync(
             rev: remote.rev,
           });
           nextState[path] = { localMtime: local.lastModified, remoteRev: result.rev };
+          await saveState(spaceOps, stateFilePath, nextState);
           continue;
         }
         if (localChanged) {
@@ -342,6 +365,7 @@ export async function performSync(
           });
           report.uploaded.push(path);
           nextState[path] = { localMtime: local.lastModified, remoteRev: result.rev };
+          await saveState(spaceOps, stateFilePath, nextState);
           continue;
         }
         if (remoteChanged) {
@@ -349,6 +373,7 @@ export async function performSync(
           const meta = await spaceOps.writeFile(path, dl.data);
           report.downloaded.push(path);
           nextState[path] = { localMtime: meta.lastModified, remoteRev: dl.rev };
+          await saveState(spaceOps, stateFilePath, nextState);
           continue;
         }
         // Không đổi bên nào — giữ nguyên state.

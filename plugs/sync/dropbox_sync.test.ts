@@ -113,6 +113,15 @@ describe("Token exchange", () => {
       "mã đã hết hạn",
     );
   });
+
+  test("exchangeCodeForTokens surfaces a clear Vietnamese timeout message when the connection hangs, not a raw DOMException", async () => {
+    (nativeFetch as any).mockRejectedValueOnce(
+      new DOMException("The operation was aborted.", "TimeoutError"),
+    );
+    await expect(exchangeCodeForTokens("key", "code", "verifier")).rejects.toThrow(
+      /quá thời gian chờ/,
+    );
+  });
 });
 
 describe("apiFetch behavior (via uploadFile as a representative call)", () => {
@@ -186,6 +195,16 @@ describe("apiFetch behavior (via uploadFile as a representative call)", () => {
 
     expect(onRateLimited).toHaveBeenCalledTimes(1);
     expect(onRateLimited).toHaveBeenCalledWith({ attempt: 1, maxAttempts: 5, waitMs: 0 });
+  });
+
+  test("a hung connection (AbortSignal.timeout firing) surfaces as a clear Vietnamese timeout error, not a raw DOMException", async () => {
+    const deps = makeDeps();
+    (nativeFetch as any).mockRejectedValueOnce(
+      new DOMException("The operation was aborted.", "TimeoutError"),
+    );
+    await expect(
+      uploadFile(deps, "/a.md", new Uint8Array([1]), { tag: "add" }),
+    ).rejects.toThrow(/Kết nối tới Dropbox quá thời gian chờ \(30s\)/);
   });
 
   test("429 gives up after MAX_RETRIES and returns the failing response as an error", async () => {
@@ -332,5 +351,12 @@ describe("refreshAccessToken", () => {
     expect(params.get("grant_type")).toBe("refresh_token");
     expect(params.get("refresh_token")).toBe("rt-value");
     expect(params.get("client_id")).toBe("app-key");
+  });
+
+  test("surfaces a clear Vietnamese timeout message when the connection hangs, not a raw DOMException", async () => {
+    (nativeFetch as any).mockRejectedValueOnce(
+      new DOMException("The operation was aborted.", "TimeoutError"),
+    );
+    await expect(refreshAccessToken("app-key", "rt-value")).rejects.toThrow(/quá thời gian chờ/);
   });
 });

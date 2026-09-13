@@ -33,6 +33,32 @@ export class WebDavConflictError extends Error {
   }
 }
 
+const FETCH_TIMEOUT_MS = 30_000;
+
+/**
+ * Không có `AbortSignal`/timeout nào từng tồn tại cho `nativeFetch` trong
+ * file này — nếu kết nối treo (server không trả lời gì, không phải lỗi
+ * 412/409), `await nativeFetch(...)` chờ VÔ THỜI HẠN, khiến "Chess: Đồng bộ
+ * WebDAV" trông như treo im lặng hàng phút không báo gì (đúng lỗi đã gặp với
+ * Dropbox, sự cố 2026-09-13 — xem `dropbox_sync.ts`'s `timedFetch`). Dùng
+ * đúng mẫu `AbortSignal.timeout()` đã có ở
+ * `client/spaces/http_space_primitives.ts` — hết hạn sẽ ném `DOMException`
+ * tên "TimeoutError", bọc lại thành `Error` tiếng Việt rõ ràng để không bị
+ * nuốt im lặng.
+ */
+async function timedFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await nativeFetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  } catch (e) {
+    if ((e as { name?: string }).name === "TimeoutError") {
+      throw new Error(
+        `Kết nối tới WebDAV quá thời gian chờ (${FETCH_TIMEOUT_MS / 1000}s) — kiểm tra mạng rồi thử lại.`,
+      );
+    }
+    throw e;
+  }
+}
+
 function authHeader(auth: WebDavAuth): string {
   return "Basic " + btoa(`${auth.username}:${auth.password}`);
 }
@@ -99,7 +125,7 @@ export async function listEntriesRecursive(
   folder: string,
 ): Promise<WebDavEntry[]> {
   const url = joinUrl(auth.baseUrl, folder) + "/";
-  const res = await nativeFetch(url, {
+  const res = await timedFetch(url, {
     method: "PROPFIND",
     headers: {
       Authorization: authHeader(auth),
@@ -159,7 +185,7 @@ export async function downloadFile(
   path: string,
 ): Promise<{ data: Uint8Array; rev: string; serverModified: string }> {
   const url = joinUrl(auth.baseUrl, `${folder}/${path}`);
-  const res = await nativeFetch(url, {
+  const res = await timedFetch(url, {
     method: "GET",
     headers: { Authorization: authHeader(auth) },
   });
@@ -190,7 +216,7 @@ async function ensureParentCollections(auth: WebDavAuth, folder: string, path: s
   for (const segment of segments) {
     cur = cur ? `${cur}/${segment}` : segment;
     const url = joinUrl(auth.baseUrl, cur) + "/";
-    const res = await nativeFetch(url, {
+    const res = await timedFetch(url, {
       method: "MKCOL",
       headers: { Authorization: authHeader(auth) },
     });
@@ -221,12 +247,12 @@ export async function uploadFile(
   if (mode.tag === "add") headers["If-None-Match"] = "*";
   else if (mode.tag === "update") headers["If-Match"] = `"${mode.rev}"`;
 
-  let res = await nativeFetch(url, { method: "PUT", headers, body: content as BodyInit });
+  let res = await timedFetch(url, { method: "PUT", headers, body: content as BodyInit });
   if (res.status === 409) {
     // Rất có thể do thư mục cha chưa tồn tại (RFC 4918) — thử tạo rồi retry
     // đúng 1 lần, không lặp vô hạn.
     await ensureParentCollections(auth, folder, path);
-    res = await nativeFetch(url, { method: "PUT", headers, body: content as BodyInit });
+    res = await timedFetch(url, { method: "PUT", headers, body: content as BodyInit });
   }
   if (res.status === 412 || res.status === 409) {
     throw new WebDavConflictError(path);
@@ -239,7 +265,7 @@ export async function uploadFile(
   let serverModified = res.headers.get("last-modified") ?? "";
   if (!rev) {
     // Không phải mọi server trả ETag ngay trong response PUT — HEAD lại để lấy.
-    const head = await nativeFetch(url, {
+    const head = await timedFetch(url, {
       method: "HEAD",
       headers: { Authorization: authHeader(auth) },
     });
@@ -251,7 +277,7 @@ export async function uploadFile(
 
 export async function deleteFile(auth: WebDavAuth, folder: string, path: string): Promise<void> {
   const url = joinUrl(auth.baseUrl, `${folder}/${path}`);
-  const res = await nativeFetch(url, {
+  const res = await timedFetch(url, {
     method: "DELETE",
     headers: { Authorization: authHeader(auth) },
   });

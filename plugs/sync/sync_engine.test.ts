@@ -268,6 +268,82 @@ describe("performSync (generic, over any SyncProvider)", () => {
     expect(dec(await space.readFile(conflictFileName!))).toContain("remote edit");
   });
 
+  test("an upload failure partway through the loop does not lose the state already checkpointed for earlier paths", async () => {
+    const space = new FakeSpace();
+    space.put("a.md", "a"); // xử lý trước, phải thành công
+    space.put("bad.md", "b"); // ném lỗi
+    space.put("c.md", "c"); // xử lý sau, phải thành công
+    provider.uploadErrorFor = "bad.md";
+
+    const stateWrites: string[] = [];
+    const originalWriteFile = space.writeFile.bind(space);
+    space.writeFile = async (path, data) => {
+      const result = await originalWriteFile(path, data);
+      if (path === "_sync/fake-state.json") stateWrites.push(dec(data));
+      return result;
+    };
+
+    const report = await performSync(provider, "", space);
+
+    expect(report.errors).toEqual([{ path: "bad.md", error: "network boom" }]);
+    expect(report.uploaded.sort()).toEqual(["a.md", "c.md"]);
+
+    // Phải có NHIỀU lần lưu, không chỉ 1 lần ở cuối -- đúng điểm bị mất trong
+    // bug gốc (2026-09-12/13: nếu quá trình bị giết ngay sau khi "a.md" xong,
+    // trước đây "a.md" cũng biến mất khỏi state vì saveState() chưa từng chạy).
+    expect(stateWrites.length).toBeGreaterThan(1);
+    const earliest = JSON.parse(stateWrites[0]);
+    expect(earliest["a.md"]).toBeDefined();
+    expect(earliest["bad.md"]).toBeUndefined();
+    expect(earliest["c.md"]).toBeUndefined();
+
+    const finalState = JSON.parse(stateWrites[stateWrites.length - 1]);
+    expect(finalState["a.md"]).toBeDefined();
+    expect(finalState["c.md"]).toBeDefined();
+    expect(finalState["bad.md"]).toBeUndefined();
+  });
+
+  test("a path with prior good state that hits a write conflict race keeps its old prior state instead of being dropped", async () => {
+    const space = new FakeSpace();
+    space.put("racy.md", "local edit", 500);
+    space.put(
+      "_sync/fake-state.json",
+      JSON.stringify({ "racy.md": { localMtime: 100, remoteRev: "rev0" } }),
+    );
+    provider.seedRemote("racy.md", "remote edit", "rev1");
+    provider.uploadConflictFor = "racy.md";
+
+    const report = await performSync(provider, "", space);
+
+    expect(report.conflicts).toContain("racy.md");
+    const savedState = JSON.parse(dec(await space.readFile("_sync/fake-state.json")));
+    // racy.md bị lỗi race lúc ghi -- không có state mới, nhưng KHÔNG bị xoá
+    // hẳn (trước đây nextState bắt đầu rỗng nên mọi lỗi đều làm mất state cũ).
+    expect(savedState["racy.md"]).toEqual({ localMtime: 100, remoteRev: "rev0" });
+  });
+
+  test("both sides deleted since last sync -> drops the path from saved state", async () => {
+    const space = new FakeSpace();
+    space.put(
+      "_sync/fake-state.json",
+      JSON.stringify({ "gone-both.md": { localMtime: 100, remoteRev: "rev0" } }),
+    );
+    // Không put("gone-both.md", ...) và không seedRemote -- đã biến mất cả 2 bên.
+
+    const report = await performSync(provider, "", space);
+
+    expect(report).toMatchObject({
+      uploaded: [],
+      downloaded: [],
+      deletedLocal: [],
+      deletedRemote: [],
+      conflicts: [],
+      errors: [],
+    });
+    const savedState = JSON.parse(dec(await space.readFile("_sync/fake-state.json")));
+    expect(savedState["gone-both.md"]).toBeUndefined();
+  });
+
   test("a resolved conflict converges: the very next sync sees no further changes", async () => {
     const space = new FakeSpace();
     space.put("game.md", "local edit", 500);
