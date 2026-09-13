@@ -23,6 +23,7 @@ globalThis.syscall = async (name, ...args) => {
 
 let oldHeight = undefined;
 let heightChecks = 0;
+let resizeObserver = undefined;
 
 globalThis.addEventListener("message", (message) => {
   const data = message.data;
@@ -41,8 +42,21 @@ globalThis.addEventListener("message", (message) => {
       }
       setTimeout(() => {
         oldHeight = undefined;
-        heightChecks = 0;
         updateHeight();
+        if (typeof ResizeObserver !== "undefined") {
+          // Event-driven, no cutoff: catches a panel toggled visible/hidden,
+          // content added, images/fonts loading late, etc. -- at ANY point in
+          // the widget's lifetime, not just its first render.
+          if (resizeObserver) resizeObserver.disconnect();
+          resizeObserver = new ResizeObserver(() => updateHeight());
+          resizeObserver.observe(document.body);
+        } else {
+          // Fallback for a sandbox without ResizeObserver -- old bounded
+          // polling behavior (better than nothing, though it still misses a
+          // resize past the cutoff).
+          heightChecks = 0;
+          pollHeight();
+        }
       });
       break;
     case "syscall-response":
@@ -78,7 +92,6 @@ globalThis.addEventListener("message", (message) => {
 function updateHeight() {
   const body = document.body, html = document.documentElement;
   let height = Math.max(body.offsetHeight, html.offsetHeight);
-  heightChecks++;
   if(height !== oldHeight) {
     oldHeight = height;
     globalThis.parent.postMessage({
@@ -86,8 +99,15 @@ function updateHeight() {
       height: height,
     });
   }
+}
+
+// Old bounded-polling fallback, only used when ResizeObserver isn't
+// available in this sandbox -- see the "html" message handler above.
+function pollHeight() {
+  updateHeight();
+  heightChecks++;
   if(heightChecks < 25) {
-    setTimeout(updateHeight, 100);
+    setTimeout(pollHeight, 100);
   }
 }
 
