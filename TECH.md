@@ -1,6 +1,7 @@
 # Kiến Trúc Kỹ Thuật Chi Tiết (TECH.md)
 
-> **Mục tiêu**: Cung cấp bức tranh toàn cảnh và chi tiết về mặt kỹ thuật của ChessNote, bao gồm các lớp hệ thống (Subsystems), luồng dữ liệu (Data Flows), cơ chế sandbox, mô hình lưu trữ, hạ tầng AI, và kiến trúc đa nền tảng.
+> **Mục tiêu**: Bức tranh toàn cảnh về kỹ thuật của ChessNote: các lớp hệ thống, luồng dữ liệu, cơ chế sandbox, mô hình lưu trữ, hạ tầng AI, đồng bộ và kiến trúc đa nền tảng.
+> Đã đối chiếu với mã nguồn tại commit `383bab47be` (2026-09-13). Số liệu/công thức chi tiết nằm ở [docs/modules/](docs/modules/README.md); bảng tra cứu sinh tự động: [docs/modules/TRA-CUU-TU-DONG.md](docs/modules/TRA-CUU-TU-DONG.md).
 
 ---
 
@@ -8,144 +9,156 @@
 
 ```mermaid
 graph TB
-    subgraph UI_Layer["1. Tầng Giao Diện & Client (client/)"]
+    subgraph UI_Layer["1. Client (client/)"]
         CM6["CodeMirror 6 Editor"]
-        PreactUI["Preact UI Components & Top Bar"]
-        BoardSVG["SVG Chessboard Renderer (DOM/Worker)"]
-        LuaVM["Space Lua VM (Custom AST & Interpreter)"]
-        PlugOS["PlugOS Web Worker Sandbox"]
+        PreactUI["Preact UI, Top Bar, Thanh tab tài liệu"]
+        IframeW["Widget iframe: bàn cờ, puzzle"]
+        LuaVM["Space Lua VM"]
+        PlugOS["PlugOS: mỗi plug một Web Worker"]
     end
 
-    subgraph Plug_Layer["2. Tầng Tiện Ích Mở Rộng (plugs/)"]
-        CorePlugs["Core Plugs (index, editor, sync...)"]
-        ChessPlug["Chess Plug (plugs/chess/)"]
-        ArasanWASM["Arasan Chess Engine (WASM Worker)"]
-        AIBridge["AI Bridge Client"]
+    subgraph Plug_Layer["2. Plug (plugs/)"]
+        Core["chess - lõi"]
+        Engine["chess-engine - Arasan WASM"]
+        DB["chess-db - SQLite WASM"]
+        AI["chess-ai"]
+        Pdf["chess-pdf-export"]
+        Rep["chess-repertoire"]
+        Themes["chess-themes"]
+        Sync["sync - Dropbox, WebDAV, E2EE"]
     end
 
-    subgraph Data_Layer["3. Tầng Dữ Liệu & Bộ Nhớ (client/data/)"]
-        KVStore["IndexedDB KV Store"]
-        ObjIndex["Object Index (chess-game, chess-game-review)"]
-        SyncEngine["Two-Way Sync Engine"]
+    subgraph Data_Layer["3. Dữ liệu"]
+        KV["IndexedDB KV"]
+        ObjIdx["Object Index: chess-game, chess-game-review"]
+        Sql["SQLite :memory: trong Worker chess-db"]
     end
 
-    subgraph Backend_Layer["4. Tầng Máy Chủ (server/ & bin/silverbullet/)"]
-        RustServer["Rust Axum/Tower HTTP Server"]
-        FileFS["Disk Space Storage / Base FS"]
-        ProxyRouter["Proxy Router (/.proxy/<target>)"]
-        ChromeRuntime["Server Headless Chrome (Lua Runtime)"]
+    subgraph Backend_Layer["4. Máy chủ Rust (server/)"]
+        Rust["Axum HTTP"]
+        Proxy["/.proxy/host/..."]
+        Fs["/.fs Space trên đĩa"]
+        Chrome["Chrome không đầu: /.export/pdf"]
     end
 
-    subgraph Sidecar_Layer["5. Tầng AI Sidecar (ai-sidecar/)"]
-        NodeSidecar["Node.js Express / Native Server (:3457)"]
-        ProcessMgr["Claude CLI Process Manager (kill-tree)"]
-        AnthropicAPI["Direct Anthropic API Client"]
+    subgraph Aux["5. Dịch vụ Node"]
+        Sidecar["ai-sidecar :3457 tuỳ chọn"]
+        Cloud["cloud-server :8080 WebDAV + /_push"]
     end
 
-    subgraph Native_Shells["6. Vỏ Bọc Đa Nền Tảng"]
-        CapacitorShell["Mobile Shell (Capacitor Android/iOS)"]
-        TauriShell["Desktop Shell (Tauri Rust)"]
+    subgraph Ext["6. Bên ngoài"]
+        Anthropic["api.anthropic.com"]
+        Dropbox["Dropbox API"]
+    end
+
+    subgraph Shells["7. Vỏ đa nền tảng"]
+        Tauri["Desktop Tauri v2"]
+        Cap["Mobile Capacitor"]
     end
 
     CM6 <--> PlugOS
-    PreactUI <--> PlugOS
-    PlugOS --> ChessPlug
-    PlugOS --> CorePlugs
-    ChessPlug --> ArasanWASM
-    ChessPlug --> AIBridge
-    PlugOS <--> KVStore
-    KVStore <--> ObjIndex
-    KVStore <--> SyncEngine
-    SyncEngine <--> RustServer
-    RustServer --> FileFS
-    RustServer --> ChromeRuntime
-    AIBridge -->|sandboxFetch -> /.proxy/| ProxyRouter
-    ProxyRouter --> NodeSidecar
-    NodeSidecar --> ProcessMgr
-    NodeSidecar --> AnthropicAPI
-    CapacitorShell --- UI_Layer
-    TauriShell --- UI_Layer
+    IframeW <-->|"postMessage syscall"| PlugOS
+    PlugOS --> Core
+    Core -->|"syscall"| Themes
+    Core -->|"syscall"| Engine
+    Core -->|"syscall"| DB
+    AI -->|"syscall"| Core
+    AI -->|"syscall"| Engine
+    AI -->|"syscall"| DB
+    Pdf -->|"syscall"| Core
+    Rep -->|"syscall"| DB
+    DB --- Sql
+    PlugOS <--> KV
+    KV <--> ObjIdx
+    PlugOS <-->|"HTTP/WS"| Rust
+    Rust --- Fs
+    Rust --> Chrome
+    AI -->|"sandboxFetch"| Proxy
+    Proxy --> Anthropic
+    Proxy --> Sidecar
+    Sync --> Dropbox
+    Sync --> Cloud
+    Tauri --- UI_Layer
+    Cap --- UI_Layer
 ```
 
 ---
 
-## 2. Các Phân Hệ Kỹ Thuật Chính (Subsystems)
+## 2. Các Phân Hệ Kỹ Thuật Chính
 
-### 2.1. Frontend Client (`client/`)
-* **Trình soạn thảo văn bản (CodeMirror 6)**:
-  - Hệ thống Live Preview: Tự động phân tích cây cú pháp Lezer Markdown để render các khối nhúng widget (như ` ```pgn `, ` ```fen `, ` ```query `).
-  - Kiến trúc Extension: Các module autocompletion, fold, decorations, keymaps đều được cấu trúc dạng CodeMirror extensions.
-* **Không gian kịch bản Space Lua (`client/space_lua/`)**:
-  - Trình thông dịch Space Lua được viết bằng TypeScript thuần.
-  - Cho phép người dùng viết các lệnh tùy biến (Custom Commands), hàm tính toán, và tạo giao diện widget động bằng Lua ngay trong ghi chú Markdown.
-* **Giao diện người dùng (Preact)**:
-  - Khung ứng dụng gọn nhẹ, render thanh điều hướng (Top Bar), bảng lệnh (Command Palette), bộ chọn trang (Page Picker), và modal thông báo.
+### 2.1. Client (`client/`) — kế thừa SilverBullet
+* **CodeMirror 6**: Live Preview parse cây Lezer Markdown để dựng widget cho khối ` ```fen `, ` ```pgn `, ` ```puzzle `, ` ```query `…
+* **Space Lua** (`client/space_lua/`): trình thông dịch Lua viết bằng TypeScript; dùng cho lệnh tuỳ biến, template, widget động và cả lệnh xuất PDF (`libraries/Library/Std/Infrastructure/Export.md`).
+* **Thanh tab tài liệu** (ChessNote thêm, 2026-09-11): `client/components/tab_bar.tsx`; phím `Alt-]`, `Alt-[`, `Alt-w`.
+* **Cầu nối widget** (`client/components/panel_html.ts`): iframe nhận `html` + `script` qua `postMessage` rồi `eval`; hai cầu ngược: `syscall(...)` và `replaceWidgetBody(cũ, mới)` (cha chỉ áp dụng khi `cũ` còn khớp). Chiều cao dùng `ResizeObserver` suốt vòng đời.
 
-### 2.2. PlugOS & Hệ Thống Plugin (`plug-api/`, `plugs/`)
-* **Cơ chế Web Worker Sandboxing**:
-  - Mỗi Plug chạy trong một Web Worker riêng biệt để cách ly hoàn toàn lỗi logic và bảo vệ luồng chính (Main UI Thread).
-* **Giao tiếp qua Syscalls (RPC Pattern)**:
-  - Plug không thể truy cập trực tiếp DOM hoặc biến toàn cục của trình duyệt.
-  - Mọi thao tác tương tác đều đi qua hệ thống **Syscalls**:
-    - `editor.*`: Thao tác vị trí con trỏ, chèn văn bản, hiển thị thông báo (`editor.flashNotification`), mở panel.
-    - `space.*`: Đọc, ghi, liệt kê các file trong Space.
-    - `index.*`: Đánh chỉ mục (`index.indexObjects`), truy vấn (`index.queryLuaObjects`).
-    - `config.*`: Đọc/ghi cấu hình người dùng.
-    - `clientStore.*`: Lưu trữ tạm thời trạng thái giao diện phía client.
-    - `sandboxFetch.fetch`: Thực hiện HTTP Request thông qua proxy của Server.
+### 2.2. PlugOS & Plug (`plug-api/`, `plugs/`)
+* Mỗi plug một Web Worker; giao tiếp qua **syscall** (RPC): `editor.*`, `space.*`, `index.*`, `config.*`, `clientStore.*`, `system.*`, `markdown.*`, `sandboxFetch.fetch`…
+* Manifest `<tên>.plug.yaml`: `functions.<hàm>.path`, `events`, `command`, `codeWidget` + `renderMode`, `syscall`.
+* 15 plug dựng sẵn (`plugs/builtin_plugs.ts`): 7 của SilverBullet (`core, editor, index, emoji, image-viewer, configuration-manager, object-graph`), `sync`, và 7 plug cờ vua.
+* **Plug độc lập (ADR-005/006)**: lời gọi xuyên plug qua syscall; mỗi plug có `external_syscalls.ts`. Mỗi plug publish được thành `.plug.js` riêng (repo `covuaduongsinh/chessnote-plug-*`).
 
-### 2.3. Plug Cờ Vua (`plugs/chess/`)
-* **Board Renderer (`board_renderer.ts`)**:
-  - Render bàn cờ và quân cờ dưới dạng đồ họa vector SVG thuần, tối ưu hóa hiệu năng render và tương thích trên màn hình Retina / High-DPI.
-  - Xử lý kéo thả quân cờ (Drag-and-drop), cảm ứng chạm trên Mobile (Touch events), hỗ trợ highlight nước đi, và lật bàn cờ (Flip).
-* **Arasan WASM Engine (`engine/arasan_engine.ts`, `uci_protocol.ts`)**:
-  - Động cơ cờ vua Arasan được biên dịch thành WebAssembly (`.wasm`), chạy trong Web Worker chuyên biệt.
-  - Giao tiếp qua chuẩn **UCI (Universal Chess Interface)**: Gửi lệnh `position fen <FEN>`, `go depth <D>`, nhận kết quả `info depth ... score cp ... pv ...`.
-* **Game Reviewer (`engine/game_reviewer.ts`)**:
-  - Đánh giá toàn bộ ván cờ, tính Centipawn Loss ($CPL$), phân loại nước đi (Best, Good, Inaccuracy, Mistake, Blunder), tính điểm độ chính xác (Accuracy %) và xác định điểm ngoặt.
-* **Game Indexer (`index.ts`)**:
-  - Bắt sự kiện `page:index` của PlugOS, quét toàn bộ AST Markdown để phát hiện các khối ` ```pgn `.
-  - Trích xuất metadata (White, Black, Result, Date, Event, ECO) và lưu trữ vào Object Index với tag `chess-game`.
+### 2.3. Bảy plug cờ vua
 
-### 2.4. Lưu Trữ & Đồng Bộ (Datastore & Sync)
-* **IndexedDB KV Storage (`client/data/`)**:
-  - Lưu trữ toàn bộ dữ liệu ghi chú, tệp đính kèm và chỉ mục cục bộ trên trình duyệt. Đảm bảo ứng dụng hoạt động 100% không cần kết nối mạng (Offline-first).
-* **Space Object Index**:
-  - Cho phép truy vấn dữ liệu có cấu trúc từ Markdown thông qua Space Lua hoặc cú pháp query `${query[[from g = index.objects("chess-game") ...]]}`.
-  - Phân tách chỉ mục ván cờ (`chess-game`) và chỉ mục kết quả phân tích (`chess-game-review`).
-* **Hai Chiều Đồng Bộ (Two-Way Sync Engine)**:
-  - Đồng bộ hoá tự động giữa IndexedDB cục bộ và thư mục tệp trên máy chủ Rust qua giao thức HTTP REST API / WebSocket.
+| Plug | Vai trò | Tài liệu |
+|---|---|---|
+| `chess` | Widget `fen`/`pgn`/`puzzle`; chế độ sửa bàn cờ; chỉ mục `chess-game` (`page:index`); ván liên quan; luật cờ qua `chess.legalMoves/applyMove/applySan` (chess.js) | [01](docs/modules/01-chess-core.md) |
+| `chess-engine` | `evalPosition` (UCI, Arasan NNUE WASM), `reviewGame`, `buildMoveList` | [02](docs/modules/02-chess-engine.md) |
+| `chess-db` | SQLite WASM trong bộ nhớ: `chess_games`, FTS5, `ai_annotations`, `repertoire_lines`, `game_embeddings`; embedding `multilingual-e5-small` | [03](docs/modules/03-chess-db.md) |
+| `chess-ai` | Cầu nối AI hai chế độ; giải thích nước; bình luận ván; xu hướng; gắn tag; hỏi đáp (semantic → FTS5); thống kê khai cuộc | [04](docs/modules/04-chess-ai.md) |
+| `chess-pdf-export` | `chess.renderPageForPdf`: khối → bàn cờ tĩnh, CSS in A4, 1–2 cột | [05](docs/modules/05-chess-pdf-export.md) |
+| `chess-repertoire` | Trích biến khai cuộc, `Chess: Ôn tập khai cuộc`, SM-2 | [06](docs/modules/06-chess-repertoire.md) |
+| `chess-themes` | 6 bộ quân SVG, 8 màu bàn | [07](docs/modules/07-chess-themes.md) |
 
-### 2.5. Hạ Tầng AI Sidecar (`ai-sidecar/`)
-* **Mục đích**: Tách biệt luồng xác thực và gọi LLM (Claude CLI / Claude Subscription / API Key) khỏi Sandbox của trình duyệt.
-* **Kiến trúc**:
-  - Tiến trình Node.js độc lập chạy tại cổng `http://127.0.0.1:3457`.
-  - Quản lý phiên đăng nhập CLI Claude cá nhân thông qua quản lý tiến trình con (`kill-tree`, `utf8-stream`).
-  - Hỗ trợ cả 2 chế độ: `subscription` (dùng tài khoản cá nhân qua CLI) và `api_key` (dùng `ANTHROPIC_API_KEY`).
-* **Luồng gọi AI chống Hallucination**:
-  1. Frontend / Plug chạy Engine WASM thật để lấy số liệu đánh giá ($cp$, $CPL$, $Accuracy$, $Turning Points$).
-  2. Gom số liệu có cấu trúc và gửi qua `AIBridge` -> Rust Proxy `/.proxy/127.0.0.1:3457/api/...` -> `ai-sidecar`.
-  3. `ai-sidecar` gọi Claude và trả kết quả đã phân tích theo cấu trúc nghiêm ngặt về cho Plug hiển thị.
+Điểm kỹ thuật cốt lõi:
+* **Engine**: `arasan.wasm` (~925 KB) + `.nnue` (~25 MB) ở `libraries/Library/Chess/`, nhúng vào binary server làm lớp nền chỉ đọc (RustEmbed). `evalPosition` tạo instance Emscripten mới mỗi lần, `stdin` là hàng đợi đồng bộ, **không** gửi `quit`; cache `WebAssembly.Module` đã compile.
+* **Game Review**: N+1 lần `evalPosition` tuần tự; `cpl = max(0, điểm trước − điểm sau)` theo bên vừa đi; phân loại `book` (6 nửa nước đầu) / `best` / `brilliant` (ăn quân và |điểm| > 300) / `good ≤ 30` / `inaccuracy ≤ 85` / `mistake ≤ 180` / `blunder`; accuracy = `clamp(100 − avg(winLoss) × 2,2 ; 40 ; 99,5)`, `winChance(cp) = 100/(1+exp(−0,00368208·cp))`.
+* **Chỉ mục ván**: mỗi khối ` ```pgn ` hợp lệ → object `chess-game` (`ref = trang@vị trí`); bỏ qua trang template (`meta/template*`, dưới `Library/`) và trang `repertoire`.
+
+### 2.4. Lưu trữ
+* **IndexedDB KV** (`client/data/`): ghi chú, tệp, chỉ mục phía client (offline-first).
+* **Object Index**: `chess-game` (từ `plugs/chess/index.ts`), `chess-game-review` (cache review, ADR-002; tự vô hiệu khi trang lưu lại nhờ `index.clearFileIndex`).
+* **SQLite `:memory:`** trong Worker của `chess-db`: cache dựng lại từ PGN mỗi lần tải. Lịch SRS (`repertoire_lines`) được bền hoá ra `_chess/repertoire-srs.json` trong Space (khoá theo trang + chuỗi nước, khôi phục sau mỗi lần dựng lại DB, được `sync` đồng bộ); ⚠️ `game_embeddings` vẫn mất khi tải lại (chi tiết: [03](docs/modules/03-chess-db.md)).
+* **Không** ghi cấu trúc lồng nhau vào frontmatter (ADR-002).
+
+### 2.5. Đồng bộ (`plugs/sync`, `cloud-server/`)
+* `sync_engine.ts`: thuật toán hai chiều dùng chung, dựa `prior = {localMtime, remoteRev}`; xung đột thật (kể cả path có ở cả hai bên mà chưa có `prior` và nội dung khác nhau) → **local thắng**, remote bị thay thế lưu vào `<tên>.conflict-<thời điểm>.md`; nhánh xoá theo `prior`; checkpoint theo lô (20 path hoặc 2 giây); loại trừ `Library/`, `Repositories/`, `perm: ro`.
+* Nhà cung cấp: Dropbox (OAuth2 PKCE, delta cursor, backoff 429), WebDAV (`If-Match`/`If-None-Match`, ETag). E2EE: PBKDF2-SHA256 600.000 vòng + AES-GCM-256, salt cố định, mã hoá nội dung không mã hoá tên file, fail-closed.
+* Tự chạy: interval (`chess.sync.autoIntervalMinutes`, mặc định 5), 30 giây sau lưu trang, khi quay lại app. Kênh đẩy: WebSocket `/_push` (debounce 3 giây phía client, gộp 800 ms phía server).
+* ChessNote Cloud: server WebDAV tối giản (ETag = sha1 nội dung, cách ly theo user, chặn path traversal). Chi tiết: [08](docs/modules/08-sync.md), [10](docs/modules/10-cloud-server.md).
+
+### 2.6. Hạ tầng AI
+* `chess.ai.mode`: **`api_key`** (mặc định) → plug gọi thẳng `https://api.anthropic.com/v1/messages` qua `/.proxy/`; **`subscription`** → `ai-sidecar` (`:3457`, spawn `claude -p --restricted …`, prompt qua stdin, `Semaphore` 2 song song / 10 chờ, `429` khi đầy).
+* **Chống hallucination**: engine tính số liệu thật → gói có cấu trúc → prompt kèm `ANTI_HALLUCINATION_RULE` → AI diễn giải. Nhiều ván: AI chỉ thấy số liệu đã gộp, không thấy PGN. Chi tiết: [04](docs/modules/04-chess-ai.md), [09](docs/modules/09-ai-sidecar.md).
+
+### 2.7. Máy chủ Rust
+* Axum; route chính: `/.fs`, `/.events`, `/.revisions`, `/.proxy/{*path}`, `/.runtime/*`, `/.export/pdf`, `/.auth*`, `/.ping`, `/.client/manifest.json`, `/metrics`.
+* `/.proxy/`: `http://` cho `localhost`/IP/`host.docker.internal`, `https://` cho host còn lại; header chuyển tiếp qua `X-Proxy-Header-*`; không giới hạn host; `405` khi server chỉ đọc.
+* Chrome không đầu (`server-runtime-chrome`): xuất PDF và runtime Lua; Windows cần `SB_CHROME_DATA_DIR` đơn giản.
 
 ---
 
-## 3. Kiến Trúc Đa Nền Tảng (Cross-Platform)
+## 3. Kiến Trúc Đa Nền Tảng
 
-### 3.1. Mobile Application (Capacitor)
-* **Vỏ bọc (Native Shell)**: Sử dụng **Capacitor 8.5** cho Android và iOS.
-* **Cơ chế phục vụ (Asset Serving)**: Bundle tĩnh được đóng gói vào thư mục `android/app/src/main/assets/public/`.
-* **Tích hợp phần cứng**: Sử dụng các plugin `@capacitor/keyboard`, `@capacitor/splash-screen`, `@capacitor/status-bar`, `@capacitor/filesystem`.
-
-### 3.2. Desktop Application (Tauri)
-* **Vỏ bọc (Desktop Shell)**: Sử dụng **Tauri 2.0 (Rust)**.
-* **Ưu điểm**: Dung lượng siêu nhẹ (< 15MB), sử dụng Webview hệ thống (WebView2 trên Windows, WebKit trên macOS/Linux), tối ưu hóa bộ nhớ RAM vượt trội so với Electron.
+* **Mobile (Capacitor)**: `appId com.chessnote.app`, `webDir client_bundle/client/.client`; Android `versionName 1.3` (`versionCode 4`); offline-first (IndexedDB); ẩn tính năng cần server (`system.isCapacitor()`).
+* **Desktop (Tauri v2)**: `productName ChessNote`, `version 1.3.0`; lệnh Tauri `get_app_info`, `export_pdf` (một `ChromePool` toàn app).
+* Chi tiết và lệnh chạy: [11](docs/modules/11-nen-tang-va-trien-khai.md).
 
 ---
 
-## 4. Bản Đồ Giao Thức Mạng & Cổng (Network & Ports)
+## 4. Bản Đồ Cổng & Giao Thức
 
 | Dịch vụ | Cổng mặc định | Giao thức | Vai trò |
 |---|---|---|---|
-| **ChessNote Rust Server** | `3000` | HTTP / WS | Phục vụ Client Bundle, File API, Proxy Router |
-| **AI Sidecar Process** | `3457` | HTTP / JSON | Quản lý phiên Claude CLI và Direct API |
-| **Rust Proxy Endpoint** | `/.proxy/<host:port>/...` | HTTP Proxy | Cầu nối an toàn từ Sandbox Worker sang Sidecar |
+| ChessNote Rust Server | `3000` (`SB_PORT`) | HTTP / WS | Client bundle, File API, Proxy, xuất PDF |
+| AI Sidecar (tuỳ chọn) | `3457` | HTTP / JSON, chỉ `127.0.0.1` | Phiên Claude CLI |
+| ChessNote Cloud | `8080` (`CHESSNOTE_CLOUD_PORT`) | WebDAV + WebSocket `/_push` | Đồng bộ tự host |
+| Rust Proxy | `/.proxy/<host:port>/…` | HTTP | Cầu nối Worker → dịch vụ ngoài |
+
+Triển khai: `docker-compose.dokploy.yml` (3 service, Traefik, `chessnote.dsc.edu.vn`), `docker-compose.vps.yml` + `Caddyfile` (VPS), `scripts/deploy-vps.sh`.
+
+---
+
+## 5. Kiểm Thử
+
+`npm test` (vitest), `npm run check`, `npm run test:e2e` (Playwright), `cargo check --workspace`. Phạm vi cờ vua + sync + `cloud-server` + `ai-sidecar`: 41 file, 394 test, xanh ngày 2026-09-29 (`npx vitest run plugs/chess … ai-sidecar`).

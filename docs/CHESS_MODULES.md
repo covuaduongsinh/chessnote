@@ -1,209 +1,151 @@
-# Đặc Tả Giải Thuật & Chi Tiết Các Module Cờ Vua (CHESS_MODULES.md)
+# Đặc Tả Giải Thuật Các Module Cờ Vua (CHESS_MODULES.md)
 
-> **Mục tiêu**: Tài liệu kỹ thuật chuyên sâu mô tả chi tiết giải thuật, cấu trúc dữ liệu, công thức toán học và nguyên lý hoạt động của toàn bộ các module trong hệ sinh thái cờ vua của **ChessNote** (`plugs/chess/`).
+> **Mục tiêu**: Bản tóm lược các giải thuật, công thức và cấu trúc dữ liệu của hệ sinh thái cờ vua trong **ChessNote**, để tra nhanh khi rà soát hoặc nhân bản.
+> **Đã viết lại hoàn toàn** theo mã nguồn tại commit `383bab47be` (2026-09-13). Bản cũ mô tả cấu trúc `plugs/chess/{engine,ai}/` (trước khi tách plug, ADR-005) và **có nhiều công thức/hằng số không khớp mã** (ví dụ ngưỡng CPL, công thức accuracy, điểm ván liên quan, giai đoạn ván) — đừng dùng lại số liệu từ bản cũ.
+> Bản đầy đủ có mermaid, phần chức năng, hạn chế: [docs/modules/README.md](modules/README.md).
 
 ---
 
-## 1. Bản Đồ Tổng Quan Các Module (`plugs/chess/`)
+## 1. Bản Đồ Module
 
 ```mermaid
 graph TD
-    subgraph UI_Widget["Giao Diện & Tương Tác"]
-        ChessPlug["chess.ts (Widget Coordinator)"]
-        BoardRenderer["board_renderer.ts (SVG Renderer)"]
-        PDFExport["pdf_export.ts (PDF Exporter)"]
+    subgraph UI["Giao diện"]
+        Core["chess: chess.ts, board_renderer.ts"]
+        Themes["chess-themes"]
+        Pdf["chess-pdf-export"]
     end
-
-    subgraph Engine_Core["Động Cơ Phân Tích"]
-        ArasanEngine["engine/arasan_engine.ts (WASM Worker)"]
-        UCIProtocol["engine/uci_protocol.ts (UCI Parser)"]
-        GameReviewer["engine/game_reviewer.ts (Review & Accuracy)"]
+    subgraph Analysis["Phân tích"]
+        Engine["chess-engine: arasan_engine, game_reviewer, uci_protocol"]
     end
-
-    subgraph Index_Data["Chỉ Mục & Dữ Liệu"]
-        Indexer["index.ts (AST PGN Scanner)"]
-        RelatedGames["related_games.ts (Rule-based Matcher)"]
+    subgraph Data["Dữ liệu"]
+        Idx["chess: index.ts, related_games.ts, text_normalize.ts"]
+        DB["chess-db: sqlite_store, srs_sm2, embedding_store"]
+        Rep["chess-repertoire"]
     end
-
-    subgraph AI_Systems["Hệ Thống Trợ Lý AI"]
-        AIBridge["ai/bridge.ts (Sidecar Client)"]
-        AICoach["ai/coach.ts (Coach 1 ván)"]
-        AITrends["ai/trends.ts (Xu hướng đa ván)"]
-        AITagging["ai/tagging.ts (Gợi ý Tag)"]
-        AIQA["ai/qa.ts (Hỏi đáp QA RAG)"]
+    subgraph AI["AI"]
+        AIp["chess-ai: bridge, coach, trends, tagging, qa"]
     end
-
-    ChessPlug --> BoardRenderer
-    ChessPlug --> GameReviewer
-    ChessPlug --> Indexer
-    ChessPlug --> PDFExport
-    ChessPlug --> RelatedGames
-    ChessPlug --> AICoach
-    ChessPlug --> AITagging
-    
-    GameReviewer --> ArasanEngine
-    ArasanEngine --> UCIProtocol
-    
-    AITrends --> GameReviewer
-    AITrends --> AIBridge
-    AITagging --> AIBridge
-    AICoach --> AIBridge
-    AIQA --> AIBridge
-    AIQA --> Indexer
-    RelatedGames --> Indexer
+    Core --> Themes
+    Core --> Engine
+    Core --> DB
+    Pdf --> Core
+    Rep --> DB
+    AIp --> Engine
+    AIp --> DB
+    AIp --> Core
+    Idx --> DB
 ```
 
----
-
-## 2. Module Render Bàn Cờ Vector SVG (`board_renderer.ts`)
-
-### 2.1. Nguyên lý Thiết kế
-* **SVG Thuần Túy**: Bàn cờ và quân cờ được dựng 100% bằng vector SVG chuẩn, không phụ thuộc thư viện bên ngoài như Chessground hay Canvas nặng nề.
-* **Tương thích Mọi Kích Thước (Responsive)**: Tự động co giãn theo chiều rộng container của CodeMirror 6 widget.
-
-### 2.2. Giải thuật Tính Tọa Độ & Đặt Quân
-Mỗi ô cờ $(col, row)$ với $col \in [0..7]$ và $row \in [0..7]$ được tính toán theo góc nhìn (Bên Trắng hoặc Bên Đen):
-* Nếu `flipped == false` (Trắng ở dưới):
-  $$x = col \times squareSize, \quad y = (7 - row) \times squareSize$$
-* Nếu `flipped == true` (Đen ở dưới):
-  $$x = (7 - col) \times squareSize, \quad y = row \times squareSize$$
-
-### 2.3. Các Lớp Đồ Họa (Render Layers)
-1. **Lớp Nền Ô Cờ (Square Background)**: Tô màu ô sáng (`#f0d9b5`) và ô tối (`#b58863`).
-2. **Lớp Highlight Nước Đi Trước (Last Move)**: Đổi màu ô xuất phát và ô đích của nước đi vừa thực hiện với sắc thái xanh nhạt.
-3. **Lớp Nước Đi Hợp Lệ (Legal Move Dots)**: Vẽ các chấm tròn bán kính nhỏ tại các ô quân cờ đang chọn có thể di chuyển tới.
-4. **Lớp Quân Cờ (Piece SVGs)**: Nhúng các biểu tượng quân cờ SVG sắc nét.
-5. **Lớp Mũi Tên Đánh Giá (Engine Arrow)**: Vẽ mũi tên chỉ hướng nước đi tốt nhất (`bestMove`) gợi ý bởi động cơ cờ vua.
+Tất cả lời gọi xuyên plug đi qua **syscall** (`external_syscalls.ts`), không import chéo.
 
 ---
 
-## 3. Module Động Cơ Cờ Vua Arasan & Giao Thức UCI (`engine/`)
+## 2. Render Bàn Cờ (`plugs/chess/board_renderer.ts`, `chess.ts`)
 
-### 3.1. Giao Thức UCI qua WebAssembly (`uci_protocol.ts`, `arasan_engine.ts`)
-* Động cơ Arasan chạy trong Web Worker độc lập. Giao tiếp hai chiều thông qua chuỗi lệnh UCI:
-  - Khởi tạo: `uci` $\to$ `isready` $\to$ `readyok`.
-  - Thiết lập thế cờ: `position fen <FEN_STRING>`.
-  - Bắt đầu tính toán: `go depth <MAX_DEPTH>` (hoặc `go movetime <MS>`).
-  - Dừng tính toán: `stop`.
+* Bàn cờ dựng bằng HTML/CSS lưới 8×8 với SVG quân cờ (không dùng Chessground/Canvas). Bộ quân và màu bàn do `chess-themes` cung cấp; màu áp dụng qua 6 biến CSS `--sq-light`, `--sq-dark`, `--board-border`, `--sq-select`, `--sq-highlight`, `--sq-dest`.
+* Hướng nhìn: với `orientation = white` ô hiển thị `(displayRow, displayCol)` ứng với `row = displayRow`, `col = displayCol`; với `black` thì `row = 7 − displayRow`, `col = 7 − displayCol`. Ô sáng khi `(col + (rank − 1)) % 2 === 1`, với `rank = 8 − row`.
+* Render tĩnh cho in: `renderStaticBoardHtml(fen, {orientation, title, showFen, pieceSet, boardTheme})`; FEN mở bằng `openChessLenient` (chấp nhận thiếu vua).
+* Luật cờ do `chess.js` xử lý; plug chỉ bọc thành syscall `chess.legalMoves`, `chess.applyMove`, `chess.applySan`.
+* Chế độ sửa bàn cờ: `boardMap` → FEN; quyền nhập thành chỉ hợp lệ khi vua và xe còn ở ô gốc; ô bắt tốt qua đường suy từ vị trí tốt/bên đi; "Lưu vào trang" thay đúng dòng FEN qua `replaceWidgetBody`.
 
-### 3.2. Công Thức Tính Xác Suất Thắng (Win Probability)
-Để chuẩn hóa điểm Centipawns ($cp$) phi tuyến tính sang thang đo xác suất thắng $Win\% \in [0..100]$, hệ thống áp dụng hàm Sigmoid chuẩn của FIDE / Lichess:
-
-$$Win\%(cp) = \frac{100}{1 + e^{-0.003682 \times cp}}$$
-
-* Nếu $cp = 0$ (Cân bằng): $Win\% = 50\%$.
-* Nếu $cp = +300$ (+3 tốt / 1 quân nhẹ): $Win\% \approx 75.1\%$.
-* Nếu $cp = +1000$ (+10 tốt / 1 Xe): $Win\% \approx 97.5\%$.
-* Trong trường hợp Chiếu hết (Mate in $N$ nước):
-  $$cp = \text{sign} \times (100000 - |N| \times 1000)$$
+Chi tiết: [modules/01](modules/01-chess-core.md), [modules/07](modules/07-chess-themes.md).
 
 ---
 
-## 4. Module Đánh Giá Ván Đấu & Độ Chính Xác (`engine/game_reviewer.ts`)
+## 3. Động Cơ Arasan & UCI (`plugs/chess-engine/`)
 
-### 4.1. Giải Thuật Tính Centipawn Loss ($CPL$)
-Đối với mỗi nước đi từ thế cờ $i$ sang thế cờ $i+1$:
-1. Động cơ tính điểm đánh giá tối ưu của thế cờ trước nước đi: $score_{before}$.
-2. Động cơ tính điểm đánh giá sau khi người chơi thực hiện nước đi: $score_{after}$.
-3. Chuyển đổi sang xác suất thắng từ góc nhìn của bên đang đi:
-   $$Win_{before} = Win\%(score_{before}), \quad Win_{after} = Win\%(score_{after})$$
-4. Mức độ tổn thất Centipawn Loss được xác định bằng:
-   $$CPL = \max(0, Win_{before} - Win_{after})$$
+* Mỗi `evalPosition(fen, depth = 12)` tạo instance Emscripten mới; `stdin` = `uci\nisready\nposition fen <FEN>\ngo depth <D>\n`; **không** gửi `quit` (sẽ ngắt tìm kiếm ở độ sâu 1). Thế hết nước đi được xử lý cục bộ.
+* `parseUciOutput`: lấy `bestmove`, và từ dòng `info … pv` cuối cùng lấy `depth`, `score cp X` hoặc `score mate X` (mate ghi đè cp), `pv`. Điểm theo góc nhìn bên đang đi.
+* Xác suất thắng (Lichess): 
 
-### 4.2. Bảng Phân Loại Nước Đi (Move Classification)
-
-| Phân loại | Ký hiệu | Điều kiện $CPL$ / Tiêu chí | Mô tả |
-|---|:---:|---|---|
-| **Brilliant** | `!!` | Hi sinh quân chủ động, đem lại ưu thế vượt trội ($CPL = 0$) | Nước cờ thiên tài |
-| **Great** | `!` | Nước cờ tối ưu duy nhất trong thế cờ hiểm nghèo | Nước cờ xuất sắc |
-| **Best** | `★` | Nước cờ trùng khớp với gợi ý hàng đầu của Engine | Nước cờ tốt nhất |
-| **Good** | `✓` | $0 < CPL \le 30$ | Nước cờ tốt |
-| **Inaccuracy** | `?!` | $30 < CPL \le 75$ | Nước cờ thiếu chính xác |
-| **Mistake** | `?` | $75 < CPL \le 150$ | Sai lầm |
-| **Blunder** | `??` | $CPL > 150$ | Sai lầm nghiêm trọng |
-| **Book** | `📖` | Nước cờ thuộc cơ sở dữ liệu khai cuộc chuẩn | Nước cờ lý thuyết |
-
-### 4.3. Công Thức Tính Độ Chính Xác Ván Đấu (Accuracy Percentage)
-Độ chính xác của mỗi người chơi trong toàn bộ $N$ nước đi được tính theo hàm phân rã mũ:
-
-$$Accuracy = \frac{1}{N} \sum_{i=1}^{N} \max\left(0, \min\left(100, 103.1668 \times e^{-0.04354 \times CPL_i} - 3.1669\right)\right)$$
-
-### 4.4. Nhận Diện Điểm Ngoặt (Turning Points)
-Một nước đi được đánh dấu là **Điểm ngoặt trận đấu** khi thỏa mãn một trong hai tiêu chí:
-1. $CPL \ge 100$ (Thay đổi đột ngột $\ge 10\%$ cơ hội thắng).
-2. Làm đảo chiều cán cân từ thế Thắng ($Win\% > 60\%$) sang thế Thua ($Win\% < 40\%$).
-
----
-
-## 5. Module Chỉ Mục Ván Cờ Đa Ghi Chú (`index.ts`)
-
-### 5.1. Cơ Chế Quét Cú Pháp AST
-1. Đăng ký sự kiện `page:index` trong `chess.plug.yaml`.
-2. Khi trang được lưu hoặc lập chỉ mục, hàm quét cây cú pháp Markdown tìm tất cả các code block có language là `pgn`.
-3. Kiểm tra trang thông qua `isTemplatePage(pageName)`: Loại bỏ toàn bộ các trang mẫu để tránh lỗi placeholder Lua.
-4. Sử dụng Regex Parser trích xuất các trường header PGN:
-   - `[White "..."]`, `[Black "..."]`, `[Result "..."]`, `[Date "..."]`, `[Event "..."]`, `[ECO "..."]`.
-5. Đóng gói thành đối tượng `chess-game`:
-   ```typescript
-   interface ChessGameObject {
-     ref: string;       // "pageName@pos"
-     tag: "chess-game";
-     page: string;
-     white: string;
-     black: string;
-     result: string;
-     date: string;
-     eco: string;
-     event: string;
-   }
-   ```
-6. Ghi vào Datastore thông qua syscall `index.indexObjects()`.
-
----
-
-## 6. Hệ Thống AI Nâng Cao Đa Ghi Chú (`ai/`)
-
-### 6.1. Cầu Nối AI Bridge (`ai/bridge.ts`)
-* Kết nối an toàn từ Sandbox Worker tới `ai-sidecar` qua syscall `sandboxFetch.fetch` -> Rust route `/.proxy/127.0.0.1:3457/api/chat`.
-* Tự động đính kèm Bearer Token xác thực nếu được cấu hình.
-
-### 6.2. Phân Tích Xu Hướng Nhiều Ván (`ai/trends.ts`)
-* **Bước 1**: Truy vấn toàn bộ ván cờ qua `index.queryLuaObjects("chess-game", {})`.
-* **Bước 2**: Đối với mỗi ván, kiểm tra cache `chess-game-review`. Nếu chưa có, kích hoạt động cơ Arasan chạy phân tích ngầm và lưu cache.
-* **Bước 3**: Gom nhóm số liệu theo:
-  - Giai đoạn ván đấu: *Khai cuộc (Nước 1-15)*, *Trung cuộc (Nước 16-40)*, *Tàn cuộc (Nước 41+)*.
-  - Mã phân loại khai cuộc ECO (A00-E99).
-  - Tỷ lệ sai lầm (Blunder/Mistake/Inaccuracy).
-* **Bước 4**: Nạp toàn bộ bảng số liệu tổng hợp (không nạp PGN thô) cho Claude AI phân tích điểm mạnh, điểm yếu và gợi ý bài học rèn luyện.
-* **Bước 5**: Tự động tạo trang báo cáo `Chess/Trends/<YYYY-MM-DD-HHmm>.md` và mở cho người dùng.
-
-### 6.3. Tự Động Gắn Tag & Tóm Tắt (`ai/tagging.ts`)
-* Phân tích ván đấu hiện tại, gửi tóm tắt metadata và 10 nước khai cuộc cho AI.
-* AI phản hồi theo định dạng nghiêm ngặt:
+  ```text
+  winChance(cp) = 100 / (1 + exp(−0,00368208 × cp))
   ```
-  TAGS: Sicilian_Defense, Tactical_Sharp, Endgame_Win
-  TOMTAT: Ván đấu kịch tính trong phòng thủ Sicilian, Trắng mắc sai lầm ở trung cuộc dẫn tới mất Xe.
-  ```
-* Sau khi người dùng xác nhận, hệ thống hợp nhất tag mới vào Frontmatter YAML một cách an toàn mà không làm mất các tag cũ.
 
-### 6.4. Tìm Kiếm Ván Cờ Tương Tự (`related_games.ts`)
-* **Thuật toán Rule-based**: Hoạt động tức thì mà không cần gọi AI hoặc tốn tài nguyên mạng.
-* Tính điểm tương đồng $Score$ giữa ván $A$ và ván $B$:
-  $$Score = S_{ECO} + S_{Opponent} + S_{Result}$$
-  - Cùng mã $ECO$: $+50$ điểm.
-  - Cùng nhóm khai cuộc (ký tự đầu ECO, ví dụ `B`): $+20$ điểm.
-  - Cùng tên đối thủ: $+30$ điểm.
-  - Cùng kết quả trận đấu: $+10$ điểm.
-* Lọc ra Top 3 ván cờ có điểm số cao nhất và hiển thị trực tiếp trong widget.
+  (`cp = 0` → 50; `+300` → ≈ 75,1; `+1000` → ≈ 97,5 — tính lại từ công thức.)
+* Điểm mate trong Game Review quy về **±10.000** (không dùng công thức mate cũ trong bản trước).
 
-### 6.5. Hỏi Đáp Trên Toàn Bộ Kho Ván Cờ (`ai/qa.ts` - Chess QA RAG)
-* Người dùng nhập câu hỏi tự do (ví dụ: *"Tôi thường thua bằng khai cuộc nào nhất khi cầm quân Đen?"*).
-* Hệ thống trích xuất toàn bộ ván cờ liên quan từ chỉ mục `chess-game`, trích xuất số liệu thống kê thắng/thua/hòa và nạp vào ngữ cảnh của Claude để sinh câu trả lời chính xác, trung thực, có dẫn chứng cụ thể từng ván cờ.
+Chi tiết: [modules/02](modules/02-chess-engine.md).
 
 ---
 
-## 7. Xuất Bản & Trích Xuất Dữ Liệu (`pdf_export.ts`)
+## 4. Game Review (`plugs/chess-engine/game_reviewer.ts`)
 
-* Chuyển đổi toàn bộ ván cờ Markdown thành trang in PDF đạt chuẩn ấn bản cờ vua FIDE.
-* Nhúng trực tiếp sơ đồ thế cờ vector SVG tại các vị trí bước ngoặt quan trọng của trận đấu.
-* Định dạng danh sách nước đi 2 cột song song với font chữ chuẩn hỗ trợ đầy đủ ký hiệu cờ vua quốc tế.
+Với ván N nước: N+1 lần `evalPosition` **tuần tự**. Với nước `i`:
+
+```text
+cpl (Trắng đi) = max(0, scoreBeforeWhite − scoreAfterWhite)
+cpl (Đen đi)   = max(0, scoreAfterWhite − scoreBeforeWhite)         // đơn vị centipawn
+winLoss        = max(0, winChance(trước) − winChance(sau))            // góc nhìn bên vừa đi
+accuracy       = clamp(100 − (Σ winLoss / số nước của bên đó) × 2,2 ; 40 ; 99,5)
+```
+
+| Điều kiện (kiểm theo thứ tự) | Loại |
+|---|---|
+| `i < 6` | `book` |
+| `cpl == 0` hoặc trùng nước tốt nhất | `best`; nếu ăn quân (`x` trong SAN) và `|scoreAfterWhite| > 300` → `brilliant` |
+| `cpl ≤ 30` | `good` |
+| `cpl ≤ 85` | `inaccuracy` |
+| `cpl ≤ 180` | `mistake` |
+| còn lại | `blunder` |
+
+`great` có trong kiểu dữ liệu nhưng **không được gán ở đâu** trong mã. Không có khái niệm "turning point" theo `Win%` như bản cũ: bước ngoặt là `pickTurningPoints` (mục 7).
+
+---
+
+## 5. Chỉ Mục Ván Cờ (`plugs/chess/index.ts`)
+
+* Sự kiện `page:index` → duyệt các `FencedCode` có `CodeInfo = pgn` → object `chess-game` với `ref = "<trang>@<vị trí khối>"`.
+* Trường: `page, pgn, white, black, result, date, eco, event, comments, whiteElo, blackElo, timeControl, opening, variation`.
+* Bỏ qua trang template (`meta/template*`, dưới `Library/`) và trang `repertoire` (đi vào `chess-repertoire`).
+* Đồng thời ghi SQLite (`chessSql.upsertGames`) với blob FTS5 = `normalize(white black eco event tags chessSummary comments)`.
+* Chuẩn hoá: `normalize = (đ→d, Đ→D) → NFD → bỏ dấu kết hợp → chữ thường`; `extractKeywords` bỏ 36 hư từ. (Bản trước thiếu bước `đ→d` nên "Đen" thành từ khoá `en` — đã sửa 2026-09-29, xem [modules/01](modules/01-chess-core.md).)
+
+---
+
+## 6. Ván Liên Quan (`plugs/chess/related_games.ts` + `chessSql.queryRelatedGames`)
+
+```text
+điểm = (cùng ECO và ECO không rỗng ? 3 : 0) + (trùng tên người chơi, không phân biệt hoa/thường ? 2 : 0)
+```
+
+Giữ `điểm > 0`, sắp giảm dần, lấy **5** (mặc định). Bỏ qua chính trang hiện tại. (Bản cũ ghi 50/20/30/10 và top 3 — **sai**.)
+
+---
+
+## 7. AI (`plugs/chess-ai/`)
+
+* **Chế độ**: `api_key` (mặc định, gọi `api.anthropic.com`, `max_tokens 1024`) hoặc `subscription` (qua `ai-sidecar`).
+* **Chống hallucination**: prompt chỉ chứa số liệu engine; kèm `ANTI_HALLUCINATION_RULE`.
+* **Bước ngoặt** (`pickTurningPoints`): lọc `blunder|mistake|brilliant|great` → sắp theo `cpl` giảm dần → lấy 10 → sắp lại theo thời gian.
+* **Xu hướng**: cache `chess-game-review` (Object Index) → `aggregateTrends`: trung bình accuracy, tổng số nước theo loại, lỗi (`blunder|mistake` trong bước ngoặt) theo giai đoạn (`moveNum ≤ 10` khai cuộc, `≤ 25` trung cuộc, còn lại tàn cuộc) và top 5 ECO. Lưu ý các số này chỉ đếm trong tối đa 10 bước ngoặt mỗi ván.
+* **Gắn tag**: đầu ra `TAGS: …` + `TOMTAT: …`; parse nghiêm ngặt, tối đa 4 tag; áp dụng bằng `index.patchFrontmatter` (`tags`, `chessSummary`), gộp không xoá tag cũ.
+* **Hỏi đáp**: có embedding → tìm ngữ nghĩa (cosine); không thì FTS5 `bm25` với truy vấn `"kw"* OR …`; tối đa 15 ván; prompt bắt buộc trích dẫn `[[TênTrang]]`.
+
+Chi tiết: [modules/04](modules/04-chess-ai.md).
+
+---
+
+## 8. SQLite, Tìm Kiếm, Ôn Tập (`plugs/chess-db/`)
+
+* 6 bảng: `chess_games`, `ai_annotations`, `ai_annotation_tags`, `repertoire_lines`, `game_embeddings`, `chess_games_fts` (FTS5). CSDL `:memory:`.
+* **Bền hoá lịch SRS**: `srs_persist.ts` ghi trạng thái ôn ra `_chess/repertoire-srs.json` (khoá `trang + chuỗi nước SAN`) và khôi phục sau mỗi lần dựng lại DB; embedding thì chưa bền hoá.
+* **SM-2 4 nút**: `again` (interval 1, ease −0,2), `hard` (×1,2, ease −0,15), `good` (1 → 6 → `round(interval × ease)`), `easy` (4 → `round(interval × ease × 1,3)`, ease +0,15); ease tối thiểu 1,3, ban đầu 2,5.
+* **Embedding**: `Xenova/multilingual-e5-small` (q8), lưu BLOB float32; xếp hạng cosine bằng JS.
+
+Chi tiết: [modules/03](modules/03-chess-db.md), [modules/06](modules/06-chess-repertoire.md).
+
+---
+
+## 9. Xuất PDF (`plugs/chess-pdf-export/pdf_export.ts`)
+
+* Thay các khối `fen`/`pgn`/`puzzle` bằng bàn cờ tĩnh; ván PGN in **một bàn cờ** (thế xuất phát hoặc theo tag `[DisplayMove "N|Nb|last"]`) **cộng toàn bộ nước đi dạng văn bản** — không phải nhiều sơ đồ như bản cũ mô tả.
+* Mặc định 2 cột, bàn cờ 400 px (kẹp 150–700); `pdfColumns`, `pdfBoardSize` trong frontmatter ghi đè theo trang.
+* Working tree đang khác HEAD (xoá module phân trang) — xem [modules/05](modules/05-chess-pdf-export.md).
+
+---
+
+## 10. Đồng Bộ (`plugs/sync/`, `cloud-server/`)
+
+Thuật toán hai chiều dựa `prior = {localMtime, remoteRev}`: file mới → đẩy/tải; xoá lan truyền khi bên còn lại không đổi; cả hai đổi → **local thắng**, bản remote bị thay thế lưu vào `.conflict-<thời điểm>.md`. Chi tiết và bảng trạng thái: [modules/08](modules/08-sync.md).
