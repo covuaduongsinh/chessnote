@@ -130,10 +130,15 @@ export function createRequestHandler() {
 }
 
 function main() {
-  const port = Number(process.env.PORT || 3457);
+  // `AI_SIDECAR_PORT` là tên biến mà Dockerfile/compose đặt; `PORT` giữ để tương
+  // thích ngược. Mặc định chỉ nghe loopback; trong Docker phải đặt
+  // `AI_SIDECAR_HOST=0.0.0.0` để container khác gọi tới được (khi đó BẮT BUỘC
+  // đặt `AUTH_SIDECAR_TOKEN`, vì endpoint điều khiển phiên Claude đăng nhập).
+  const port = Number(process.env.AI_SIDECAR_PORT || process.env.PORT || 3457);
+  const host = process.env.AI_SIDECAR_HOST || "127.0.0.1";
   const server = createServer(createRequestHandler());
-  server.listen(port, "127.0.0.1", () => {
-    console.log(`[chessnote-ai-sidecar] nghe cổng 127.0.0.1:${port}`);
+  server.listen(port, host, () => {
+    console.log(`[chessnote-ai-sidecar] nghe cổng ${host}:${port}`);
     if (!AUTH_TOKEN) {
       console.warn(
         "[chessnote-ai-sidecar] CẢNH BÁO: chưa đặt AUTH_SIDECAR_TOKEN — mọi tiến trình trên máy gọi được endpoint này",

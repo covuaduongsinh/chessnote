@@ -49,7 +49,7 @@ services:
     environment:
       - CHESSNOTE_CLOUD_PORT=8080
       - CHESSNOTE_CLOUD_DATA_DIR=/data
-      - CHESSNOTE_CLOUD_USERS=${SYNC_USERS:-admin:MatKhauSync2026!}
+      - CHESSNOTE_CLOUD_USERS=${SYNC_USERS:?Chưa đặt SYNC_USERS trong biến môi trường Dokploy (dạng user:matkhau)}
     volumes:
       - chessnote-sync-data:/data
     networks:

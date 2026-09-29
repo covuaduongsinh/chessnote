@@ -4,12 +4,12 @@ import { centipawnsToWinChance } from "./uci_protocol.ts";
 
 export type MoveClassification =
   | "brilliant" // !!
-  | "great" // !
+  | "great" // ! (khai báo sẵn nhưng reviewGame() chưa gán loại này)
   | "best" // Best engine move
   | "good" // Minor difference
-  | "inaccuracy" // ?! (CPL 30 - 75)
-  | "mistake" // ? (CPL 75 - 150)
-  | "blunder" // ?? (CPL > 150)
+  | "inaccuracy" // ?! (CPL 30 - 85)
+  | "mistake" // ? (CPL 85 - 180)
+  | "blunder" // ?? (CPL > 180)
   | "book"; // Opening book move
 
 /** The cheap, chess.js-only move data needed to render/navigate a PGN — no engine involved, safe to compute at widget render time. */

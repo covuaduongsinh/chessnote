@@ -114,14 +114,15 @@ describe("performSync cursor/delta merge (Giai đoạn 2.1)", () => {
     const provider = new CursorSyncProvider();
     provider.seedRemote("unchanged.md", "same forever", "rev0");
     // Lần 1: full listing, thấy unchanged.md đã tồn tại từ trước ở cả 2 bên
-    // nhưng CHƯA có `prior` state -> thuật toán coi "chưa từng đồng bộ" và
-    // đẩy local lên (đúng hành vi hiện có, không liên quan tới cursor/delta) --
+    // với nội dung Y HỆT nhau nhưng CHƯA có `prior` state -> chỉ ghi nhận state
+    // (không upload thừa, không xung đột; trước đây bị đẩy đè lên remote) --
     // quan trọng là nó ghi lại `prior` cho lần sau.
     provider.responses = [
       { entries: [entry("unchanged.md", "rev0")], cursor: "cursor-1", full: true },
     ];
     const first = await performSync(provider, "", space);
-    expect(first.uploaded).toEqual(["unchanged.md"]);
+    expect(first.uploaded).toEqual([]);
+    expect(first.conflicts).toEqual([]);
     expect(first.downloaded).toEqual([]);
 
     // Lần 2: chỉ trả delta RỖNG (không gì đổi) -- unchanged.md KHÔNG xuất hiện
