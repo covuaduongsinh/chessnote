@@ -14,6 +14,12 @@ if [ ! -f .env ]; then
     echo "👉 Bạn có thể chỉnh sửa mật khẩu trong .env bất cứ lúc nào bằng lệnh: nano .env"
 fi
 
+# 1b. Từ chối triển khai nếu còn mật khẩu mẫu (mẫu nằm công khai trong repo)
+if grep -q "DOI_MAT_KHAU_NAY" .env; then
+    echo "❌ .env vẫn còn mật khẩu mẫu 'DOI_MAT_KHAU_NAY'. Sửa SB_AUTH_USER và SYNC_USERS (nano .env) rồi chạy lại."
+    exit 1
+fi
+
 # 2. Kiểm tra và cài đặt Docker trên Ubuntu
 if ! command -v docker &> /dev/null; then
     echo "📦 Docker chưa được cài đặt. Đang cài đặt Docker cho Ubuntu..."

@@ -785,6 +785,52 @@ export class ChessSqlStore {
     return (rows as unknown as RepertoireLineRow[])[0] ?? null;
   }
 
+  /**
+   * Khôi phục trạng thái SRS đã bền hoá (srs_persist.ts) vào một dòng vừa được
+   * dựng lại. Chỉ áp dụng khi dòng CHƯA từng được ôn trong phiên này
+   * (`review_count = 0` và `due_date IS NULL`) — không bao giờ đè lên kết quả
+   * ôn mới hơn.
+   */
+  async applyRepertoireState(
+    ref: string,
+    state: {
+      dueDate: string | null;
+      easeFactor: number;
+      intervalDays: number;
+      reviewCount: number;
+      lastGrade: string | null;
+    },
+  ): Promise<void> {
+    const db = await this.ensureDb();
+    if (!db) return;
+    db.exec(
+      `UPDATE repertoire_lines
+       SET due_date = ?, ease_factor = ?, interval_days = ?, review_count = ?, last_grade = ?
+       WHERE ref = ? AND review_count = 0 AND due_date IS NULL`,
+      {
+        bind: [
+          state.dueDate,
+          state.easeFactor,
+          state.intervalDays,
+          state.reviewCount,
+          state.lastGrade,
+          ref,
+        ],
+      },
+    );
+  }
+
+  /** Toàn bộ dòng của một trang (dùng để khớp với trạng thái đã bền hoá sau khi dựng lại). */
+  async getRepertoireLinesForPage(page: string): Promise<RepertoireLineRow[]> {
+    const db = await this.ensureDb();
+    if (!db) return [];
+    const rows = db.exec(
+      `SELECT ${ChessSqlStore.REPERTOIRE_SELECT_COLUMNS} FROM repertoire_lines WHERE page = ?`,
+      { bind: [page], rowMode: "object", returnValue: "resultRows" },
+    );
+    return rows as unknown as RepertoireLineRow[];
+  }
+
   async upsertEmbedding(e: EmbeddingUpsert): Promise<void> {
     const db = await this.ensureDb();
     if (!db) return;

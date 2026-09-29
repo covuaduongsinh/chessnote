@@ -17,6 +17,7 @@ timeline
     Giai đoạn 4 : Đa nền tảng : Desktop Tauri (Rust) : Mobile Capacitor (Android/iOS)
     Giai đoạn 5 : Hạ tầng AI Sidecar : Hỗ trợ Claude CLI & API : AI Coach 1 ván
     Giai đoạn A-E : AI Đa Ghi Chú : Game Indexer : Trends Analysis : Tagging : Related Games : QA RAG
+    Sau A-E : Xuất PDF : Đồng bộ Dropbox/WebDAV/Cloud : Thanh tab : SQLite + SRS + embedding : Tách 7 plug độc lập : Sửa bàn cờ tự do
 ```
 
 ### Chi tiết các mốc phát triển:
@@ -40,6 +41,7 @@ timeline
 * **Bối cảnh**: Sandbox Web Worker của PlugOS trên trình duyệt bị giới hạn bảo mật nghiêm ngặt (không có quyền truy cập shell, file hệ thống hoặc quản lý tiến trình Claude CLI).
 * **Quyết định**: Xây dựng `ai-sidecar/` thành tiến trình Node.js riêng biệt tại cổng `127.0.0.1:3457`. PlugOS giao tiếp với Sidecar qua syscall `sandboxFetch.fetch` -> Rust Proxy endpoint `/.proxy/127.0.0.1:3457/` -> Node Sidecar.
 * **Hệ quả**: Giữ nguyên tính bảo mật của Sandbox, không làm phức tạp hóa mã nguồn Rust, đồng thời hỗ trợ quản lý vòng đời tiến trình CLI Claude mượt mà (`kill-tree`, `utf8-stream`).
+* **[Cập nhật sau ADR-006]**: sidecar chỉ còn là **tuỳ chọn nâng cao** (`chess.ai.mode = "subscription"`); chế độ mặc định `api_key` gọi thẳng `api.anthropic.com` qua `/.proxy/`, không cần sidecar.
 
 ---
 
@@ -83,7 +85,7 @@ timeline
 
 ### 📌 ADR-006: Làm Cả 7 Plug Cờ Vua Cài Độc Lập Được Lên SilverBullet Gốc
 * **Bối cảnh**: ADR-005 để lại 5/6 plug không cài độc lập được (phụ thuộc `chessSql`/`chessEmbedding` — syscall lõi chỉ ChessNote có) — cản trở mục tiêu thương mại hóa (bán/phân phối plug độc lập). Khảo sát lại phát hiện giả định "phải đặt SQLite/embedding model ở lõi `client/`" là **sai lúc lên kế hoạch DBMS ban đầu**, không phải giới hạn kỹ thuật thật: `plugs/chess-engine/arasan_engine.ts` đã chứng minh WASM chạy tốt thẳng trong Worker sandbox của 1 plug, không cần lõi.
-* **Quyết định — 4 giai đoạn** (chi tiết: `docs/plans/2026-09-12-lam-plug-co-vua-cai-dat-doc-lap.md`):
+* **Quyết định — 4 giai đoạn** (file kế hoạch `docs/plans/2026-09-12-lam-plug-co-vua-cai-dat-doc-lap.md` được dẫn ở đây **không có trong repo** khi rà soát 2026-09-29 — nội dung ADR này là nguồn duy nhất còn lại):
   1. **Tách `chessSql`/`chessEmbedding`** (vốn ở `client/data/*.ts`, đăng ký qua `client_system.ts`) thành plug mới `chess-db`, tự khai báo syscall (giữ nguyên tên `chessSql.*`/`chessEmbedding.*`) — không cần sửa lõi/client nào khác.
   2. **Xóa sạch import xuyên plug còn lại** (rộng hơn phạm vi ADR-005 tưởng đủ) — mỗi plug giờ có `external_syscalls.ts` riêng bọc `syscall()` cho MỌI phụ thuộc plug khác, kể cả phụ thuộc vào plug **lõi chuẩn** `index` (dùng syscall công khai `index.extractFrontmatter` thay vì import thẳng `plugs/index/frontmatter.ts` — file đó không nằm trong SDK public dù `index` luôn có sẵn trong mọi bản SilverBullet).
   3. **`chess-ai` thêm chế độ `chess.ai.mode = "api_key"`** (mặc định mới) — gọi thẳng `api.anthropic.com` qua cơ chế `/.proxy/` chuẩn (đã xác nhận proxy Rust generic, không giới hạn host) — không cần `ai-sidecar/` nữa. `"subscription"` (qua sidecar + gói thuê bao cá nhân) giữ làm tùy chọn nâng cao.
@@ -99,9 +101,74 @@ timeline
 
 ---
 
+## 2b. Nhật Ký Các Đợt Phát Triển Sau Phase A-E (rút từ git log và comment mã)
+
+> Danh sách đầy đủ từng commit: [docs/modules/LICH-SU-COMMIT.md](docs/modules/LICH-SU-COMMIT.md) (sinh tự động, 53 commit từ 2026-09-06 đến 2026-09-13).
+
+| Ngày | Đợt | Nội dung chính |
+|---|---|---|
+| 2026-09-07 | Audit + Giai đoạn 0–2 | Audit phát hiện "vỏ giao diện": bàn cờ không đi được, engine giả, AI Gateway là code chết, Dropbox mồ côi. Sửa: bàn cờ chơi được thật, puzzle chấm thật, **Arasan WASM thật** nối vào Engine Eval và Game Review (`docs/plans/2026-09-07-danh-gia-va-ke-hoach-hoan-thien-chessnote.md`) |
+| 2026-09-08 | Giai đoạn 3, Dropbox, Desktop, AI Coach | `ai-sidecar` (subscription-bridge), Dropbox Sync thật (OAuth2 PKCE), ứng dụng Desktop Tauri v2, AI giải thích nước đi + bình luận ván |
+| 2026-09-09 | AI phạm vi rộng A–E, xuất PDF | Chess Game Indexer, xu hướng, gắn tag, ván liên quan, hỏi đáp; xuất PDF bàn cờ tĩnh; ẩn tính năng cần server trên mobile |
+| 2026-09-10 | Triển khai | Dockerfile đa tầng, cấu hình Dokploy; sửa healthcheck; cô lập thư mục dữ liệu Chrome ở `/tmp`; PDF ép tỉ lệ 1:1 cho bàn cờ; đồng bộ Dropbox/WebDAV + ChessNote Cloud (Phase 0, A, B) |
+| 2026-09-11 | Giao diện, triển khai VPS | Thanh tab tài liệu; bộ quân + màu bàn + mặc định toàn cục; bộ cấu hình Docker VPS/Dokploy cho `chessnote.dsc.edu.vn`; sửa cú pháp Traefik v3 |
+| 2026-09-12 | DBMS, tách plug, plug độc lập | SQLite WASM + FTS5 + SRS + embedding; tách 6 plug (ADR-005); 7 plug cài độc lập (ADR-006); Dropbox chẩn đoán; sửa sync loại trừ `Library/Std`; Android 1.3 / Desktop 1.3.0; FEN thiếu vua |
+| 2026-09-13 | Hiệu năng + sửa bàn cờ | Bàn cờ sửa tự do → nhập thành/en-passant → kéo-thả → "Lưu vào trang"; cache `WebAssembly.Module` của Arasan; giới hạn tiến trình `claude` đồng thời; sync: checkpoint theo lô, delta cursor Dropbox, hiện backoff 429, debounce tín hiệu đẩy; sửa chiều cao widget; giới hạn số mục con mỗi thư mục trong cây |
+
+**Các "giai đoạn" hiệu năng đánh số trong comment mã (2026-09-13)**: 1.1 checkpoint đồng bộ theo lô; 1.2a/b debounce tín hiệu đẩy (client 3 s, server gộp 800 ms); 2.1 liệt kê delta Dropbox bằng cursor; 2.2 giới hạn đồng thời `ai-sidecar`; 3.1 cache `WebAssembly.Module` Arasan. Mục tiêu chung: giảm "quá tải" của phần mềm.
+
+---
+
+## 2c. Bài Học Kỹ Thuật Rút Từ Comment Trong Mã (đáng đọc trước khi sửa)
+
+* **`quit` cùng lô UCI làm engine dừng ở độ sâu 1** (`plugs/chess-engine/arasan_engine.ts`): để hàng đợi `stdin` hết → EOF → engine tự thoát sạch.
+* **Lỗi `Invalid URL` của SQLite WASM trong Worker** do `import.meta.url` ở ngữ cảnh `blob:`; lỗi bị nuốt khiến `db` mãi `undefined` (ADR-006).
+* **Vòng lặp xung đột vô tận dưới `Library/Std`** (sự cố sync 2026-09-13): chỉ loại theo `perm === "ro"` là chưa đủ, phải loại theo tiền tố đường dẫn.
+* **Bug nhánh xoá của sync**: so `remoteChanged || localChanged` để "phát hiện xoá" làm nhánh xoá bị khoá; dùng `prior` để biết chắc.
+* **`nativeFetch` không timeout từng treo vô hạn** và làm mất tiến độ cả lượt sync → thêm timeout 30 s + checkpoint.
+* **Tiêu đề API Dropbox chứa tên file tiếng Việt** vi phạm quy định header → `toAsciiSafeHeaderJson`.
+* **`SIGKILL` lúc CLI ghi credentials có thể cụt file token** → `killTree` TERM → chờ → KILL; Windows cần `taskkill /T` giết cả cây tiến trình.
+* **Prompt qua stdin dạng byte** (tránh trần 32.767 ký tự dòng lệnh Windows và việc `\n` bị dịch thành `\r\n`).
+* **Request AI mang tool** từng bị một số tài khoản subscription trả "out of extra usage" → khoá tool chặt (`--restricted`, `--disallowedTools …`).
+* **Chrome/Edge thoát exit 21 trên Windows** khi thư mục dữ liệu mặc định nằm sâu trong Space → `SB_CHROME_DATA_DIR`.
+* **Biến khai báo sau lần vẽ đầu (TDZ)** làm sập script trình sửa bàn cờ (commit `0d884883`).
+* **`Page.printToPDF` không tôn trọng ổn định `break-inside: avoid` trong bố cục nhiều cột** (hạn chế Blink) → từng làm tiền phân trang phía server; hiện working tree đã bỏ (xem [docs/modules/05-chess-pdf-export.md](docs/modules/05-chess-pdf-export.md)).
+
+---
+
+## 2d. Phát Hiện Khi Rà Soát Toàn Bộ Module (2026-09-29)
+
+Chi tiết, mức độ và **trạng thái xử lý** ở [docs/modules/README.md](docs/modules/README.md). Đợt xử lý cùng ngày 2026-09-29 đã sửa mục 1–4 (test đơn vị xanh, chưa thử trên trình duyệt); tóm tắt:
+
+1. ✅ Chữ `đ` mất khi tách từ khoá (đã tái hiện bằng node) → sửa `normalize` (`đ→d`) + 3 test.
+2. ✅ Lịch SRS mất khi tải lại (SQLite `:memory:`) → bền hoá ra `_chess/repertoire-srs.json` (`plugs/chess-db/srs_persist.ts`); embedding vẫn mất.
+3. ✅ Đồng bộ lần đầu file trùng tên: từng ghi đè remote không dấu vết → nay giống nhau thì ghi state, khác thì `.conflict` (+2 test).
+4. ✅ Mật khẩu mặc định ghi cứng trong compose → bỏ, `${VAR:?}`; **cần đặt `SYNC_USERS` trên Dokploy; mật khẩu cũ còn trong lịch sử git**.
+5. `great` không bao giờ được gán; ngưỡng CPL trong comment ≠ mã; các số "theo giai đoạn/ECO" chỉ đếm trong 10 bước ngoặt mỗi ván.
+6. `docs/CHESS_MODULES.md` bản cũ sai nhiều hằng số → đã viết lại.
+7. Working tree lệch HEAD ở module PDF (xoá phân trang, chưa commit, chưa rõ ý định).
+
+---
+
+## 2e. Nhật Ký Tương Tác Có Ý Nghĩa Với Người Duy Trì
+
+* **Ràng buộc quy trình đã chốt** (bản bàn giao 2026-09-07): mô hình AI chỉ dùng cá nhân + công tắc chuyển API key; engine là Arasan WASM thật; chỉ dùng phần mềm giấy phép MIT hoặc tương đương; tài liệu kế hoạch lưu ở `docs/plans/` tên `YYYY-MM-DD-mo-ta-ngan.md`; giao tiếp bằng tiếng Việt.
+* **2026-09-29 (đợt 2) — xử lý phát hiện**: sửa `plugs/chess/text_normalize.ts`; thêm `plugs/chess-db/srs_persist.ts` (+ `applyRepertoireState`, `getRepertoireLinesForPage` trong `sqlite_store.ts`, nối vào `index.ts`); sửa `plugs/sync/sync_engine.ts` (nhánh không `prior`, tách `resolveConflict`, `bytesEqual`); bỏ mật khẩu mặc định (`docker-compose.*.yml`, `.env.vps.example`, `scripts/deploy-vps.sh`); `ai-sidecar/src/server.ts` đọc `AI_SIDECAR_PORT`/`AI_SIDECAR_HOST`; sửa comment ngưỡng CPL ở `game_reviewer.ts`. Kiểm: `tsc --noEmit` sạch, 41 file / 394 test xanh, `npm run build:plugs` thành công. **Không đụng** thay đổi PDF chưa commit của chủ dự án.
+* **2026-09-29 — Đợt tài liệu hoá toàn bộ module**: tạo `docs/modules/` (11 tài liệu hai tầng + 2 file sinh tự động), `docs/NHAN-BAN.md`, script `scripts/gen_module_reference.py`; viết lại `CLAUDE.md`, `AGENTS.md`, `TECH.md`, `SKILLS.md`, `docs/CHESS_MODULES.md`; cập nhật `README.md` và `MEMORY.md`. Ghi kế hoạch/nhật ký ở `docs/plans/2026-09-29-tai-lieu-hoa-toan-bo-module.md`. Chạy kiểm: 40 file, 382 test xanh (chỉ phạm vi cờ vua + sync + dịch vụ Node).
+
+---
+
 ## 3. Lộ Trình Phát Triển Tương Lai (Future Roadmap)
 
 * [ ] **Tích hợp Stockfish 17+ WASM NNUE**: Bổ sung thêm tùy chọn động cơ Stockfish mạnh mẽ song song với Arasan.
 * [ ] **Tự động đồng bộ ván đấu từ Lichess / Chess.com**: Tự động kéo các ván đấu mới chơi về thành các trang ghi chú phân tích.
-* [ ] **Bàn cờ 3D / Tùy biến Theme quân cờ**: Bổ sung thêm các bộ cờ đẹp mắt (Staunton, Wood, Neon).
-* [ ] **Mã hóa đầu cuối (E2EE) cho Space Sync**: Tăng cường bảo mật khi đồng bộ dữ liệu qua máy chủ đám mây cá nhân.
+* [ ] **Bàn cờ 3D** (phần Theme quân cờ/màu bàn đã làm ở `chess-themes`, 6 bộ quân + 8 màu bàn; bộ **Neon** chưa có): Bổ sung thêm các bộ cờ đẹp mắt (Staunton, Wood, Neon).
+* [x] **Mã hóa đầu cuối (E2EE) cho Space Sync**: Đã có (`plugs/sync/e2ee.ts`, PBKDF2 + AES-GCM) — xem [docs/modules/08-sync.md](docs/modules/08-sync.md); còn hạn chế salt cố định.
+* [x] ~~Bền hoá lịch SRS~~ (xong 2026-09-29). [ ] **Bền hoá embedding** (còn nằm trong SQLite `:memory:`) — xem [docs/modules/03-chess-db.md](docs/modules/03-chess-db.md).
+* [x] ~~Sửa chuẩn hoá tiếng Việt `đ→d`~~ (xong).
+* [x] ~~Bỏ mật khẩu mặc định ghi cứng~~ (xong; còn: đổi mật khẩu cũ, đặt `SYNC_USERS` trên Dokploy).
+* [ ] **Thử tay trên trình duyệt**: ôn 1 biến khai cuộc → F5 → xác nhận lịch còn; sync lần đầu với thiết bị đã có file trùng tên.
+* [ ] `diagnoseSync` (Dropbox chẩn đoán) chưa báo xung đột trường hợp không `prior`.
+* [ ] Compose: `chessnote-ai` cần `AI_SIDECAR_HOST=0.0.0.0` + `AUTH_SIDECAR_TOKEN` và image có CLI `claude` (hoặc bỏ service nếu chỉ dùng `api_key`).
+* [ ] **Quyết định về module phân trang PDF** (working tree đang xoá, chưa commit).
+* [ ] **Rà soát giấy phép** các bộ quân cờ SVG, engine Arasan và mạng NNUE trước khi thương mại hoá.

@@ -6,6 +6,7 @@
 // client/client_system.ts used to do (one shared instance passed to
 // chessSqlSyscalls()/chessEmbeddingSyscalls()) before this became its own
 // plug.
+import { space } from "@silverbulletmd/silverbullet/syscalls";
 import {
   bytesToFloat32,
   cosineSimilarity,
@@ -13,6 +14,13 @@ import {
   embedText,
   float32ToBytes,
 } from "./embedding_store.ts";
+import {
+  type PersistedSrsState,
+  parseSrsState,
+  serializeSrsState,
+  SRS_STATE_PATH,
+  srsKey,
+} from "./srs_persist.ts";
 import {
   type AiAnnotationFrontmatterSync,
   type AiAnnotationUpsert,
@@ -90,11 +98,50 @@ export function deleteAiAnnotationsForPage(page: string): Promise<void> {
   return store.deleteAiAnnotationsForPage(page);
 }
 
-export function syncRepertoireLinesForPage(
+// Trạng thái SRS bền hoá ra file trong Space (xem srs_persist.ts). Nạp một lần
+// khi cần, rồi giữ trong bộ nhớ; mọi lỗi đọc/ghi file chỉ ghi log — không được
+// làm hỏng việc đánh chỉ mục trang hay lượt ôn tập.
+let persistedSrs: Promise<PersistedSrsState> | undefined;
+
+function loadPersistedSrs(): Promise<PersistedSrsState> {
+  if (!persistedSrs) {
+    persistedSrs = (async () => {
+      try {
+        if (!(await space.fileExists(SRS_STATE_PATH))) return {};
+        const bytes = await space.readFile(SRS_STATE_PATH);
+        return parseSrsState(new TextDecoder().decode(bytes));
+      } catch (e) {
+        console.error("[chess-db] Không đọc được trạng thái SRS đã lưu:", e);
+        return {};
+      }
+    })();
+  }
+  return persistedSrs;
+}
+
+async function savePersistedSrs(state: PersistedSrsState): Promise<void> {
+  try {
+    await space.writeFile(
+      SRS_STATE_PATH,
+      new TextEncoder().encode(serializeSrsState(state)),
+    );
+  } catch (e) {
+    console.error("[chess-db] Không ghi được trạng thái SRS:", e);
+  }
+}
+
+export async function syncRepertoireLinesForPage(
   page: string,
   lines: RepertoireLineUpsert[],
 ): Promise<void> {
-  return store.syncRepertoireLinesForPage(page, lines);
+  await store.syncRepertoireLinesForPage(page, lines);
+  // DB vừa được dựng lại từ trang (mặc định SRS) → khôi phục lịch ôn đã lưu.
+  const persisted = await loadPersistedSrs();
+  if (Object.keys(persisted).length === 0) return;
+  for (const row of await store.getRepertoireLinesForPage(page)) {
+    const saved = persisted[srsKey(row.page, row.movesSan)];
+    if (saved) await store.applyRepertoireState(row.ref, saved);
+  }
 }
 
 export function deleteRepertoireLinesForPage(page: string): Promise<void> {
@@ -111,11 +158,23 @@ export function getDueRepertoireLines(
   return store.getDueRepertoireLines(limit);
 }
 
-export function recordRepertoireReview(
+export async function recordRepertoireReview(
   ref: string,
   grade: SrsGrade,
 ): Promise<RepertoireLineRow | null> {
-  return store.recordRepertoireReview(ref, grade);
+  const row = await store.recordRepertoireReview(ref, grade);
+  if (row) {
+    const persisted = await loadPersistedSrs();
+    persisted[srsKey(row.page, row.movesSan)] = {
+      dueDate: row.dueDate,
+      easeFactor: row.easeFactor,
+      intervalDays: row.intervalDays,
+      reviewCount: row.reviewCount,
+      lastGrade: row.lastGrade,
+    };
+    await savePersistedSrs(persisted);
+  }
+  return row;
 }
 
 export function debugDump(): Promise<DebugDump> {

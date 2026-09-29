@@ -6,6 +6,10 @@ describe("normalize", () => {
     expect(normalize("Phòng Thủ Sicilian")).toBe("phong thu sicilian");
   });
 
+  test("maps đ/Đ to d (they are not combining marks, so NFD alone keeps them)", () => {
+    expect(normalize("Đen đối thủ")).toBe("den doi thu");
+  });
+
   test("leaves already-plain text untouched aside from casing", () => {
     expect(normalize("Sicilian Najdorf")).toBe("sicilian najdorf");
   });
@@ -24,6 +28,19 @@ describe("extractKeywords", () => {
       "choi",
       "sicilian",
     ]);
+  });
+
+  test("keeps the leading đ of a word instead of dropping it", () => {
+    expect(extractKeywords("Đen thắng ván Sicilian")).toEqual([
+      "den",
+      "thang",
+      "van",
+      "sicilian",
+    ]);
+  });
+
+  test("now drops stopwords that start with đ (đã, để, được, đó)", () => {
+    expect(extractKeywords("đã để được đó Sicilian")).toEqual(["sicilian"]);
   });
 
   test("drops single-character tokens", () => {

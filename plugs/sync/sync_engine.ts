@@ -232,6 +232,12 @@ export function conflictPath(path: string, now: Date = new Date()): string {
   return `${base}.conflict-${ts}.md`;
 }
 
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 export function isUtf8Decodable(bytes: Uint8Array): string | null {
   try {
     const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -429,6 +435,39 @@ export async function performSync(
   // sync kế xử lý lại đúng các path đó.
   let pendingSinceCheckpoint = 0;
   let lastCheckpointAt = Date.now();
+  // Xung đột (cả hai bên khác nhau): bản local thắng và được đẩy đè lên remote;
+  // nội dung remote bị thay thế được lưu vào file `.conflict-<thời điểm>.md`.
+  const resolveConflict = async (
+    path: string,
+    local: FileMeta,
+    remote: RemoteFileEntry,
+    remoteData: Uint8Array,
+  ) => {
+    const text = isUtf8Decodable(remoteData);
+    const cPath = conflictPath(path);
+    const body =
+      `# Xung đột đồng bộ ${provider.name}: ${path}
+
+` +
+      `Phiên bản trên ${provider.name} khác với bản cục bộ tại thời điểm đồng bộ này. ` +
+      `Bản cục bộ được GIỮ NGUYÊN ở \`${path}\` (và đã đẩy đè lên ${provider.name}); ` +
+      `nội dung bản ${provider.name} (bị thay thế) được lưu lại bên dưới để bạn đối chiếu:
+
+---
+
+` +
+      (text ?? "*(nội dung nhị phân, không hiển thị được dạng văn bản)*");
+    await spaceOps.writeFile(cPath, new TextEncoder().encode(body));
+    report.conflicts.push(path);
+
+    const localData = await spaceOps.readFile(path);
+    const result = await provider.upload(folder, path, localData, {
+      tag: "update",
+      rev: remote.rev,
+    });
+    nextState[path] = { localMtime: local.lastModified, remoteRev: result.rev };
+  };
+
   const checkpoint = async () => {
     pendingSinceCheckpoint++;
     if (
@@ -511,26 +550,27 @@ export async function performSync(
       }
 
       if (local && remote) {
-        if (localChanged && remoteChanged && prior) {
+        if (!prior) {
+          // Lần đầu thấy path này mà CẢ HAI bên đã có file (thiết bị mới đã có
+          // sẵn ghi chú trùng tên, hoặc state bị xoá): trước đây rơi vào nhánh
+          // `localChanged` bên dưới và ghi đè remote KHÔNG để lại dấu vết. Nay:
+          // nội dung y hệt thì chỉ ghi nhận state (không upload thừa); khác thì
+          // đi qua đúng nhánh xung đột (remote bị thay thế được lưu vào .conflict).
+          const dl = await provider.download(folder, path);
+          const localData = await spaceOps.readFile(path);
+          if (bytesEqual(dl.data, localData)) {
+            nextState[path] = { localMtime: local.lastModified, remoteRev: dl.rev };
+            await checkpoint();
+            continue;
+          }
+          await resolveConflict(path, local, remote, dl.data);
+          await checkpoint();
+          continue;
+        }
+        if (localChanged && remoteChanged) {
           // Xung đột thật: cả hai đổi kể từ lần đồng bộ trước.
           const dl = await provider.download(folder, path);
-          const text = isUtf8Decodable(dl.data);
-          const cPath = conflictPath(path);
-          const body =
-            `# Xung đột đồng bộ ${provider.name}: ${path}\n\n` +
-            `Phiên bản trên ${provider.name} khác với bản cục bộ tại thời điểm đồng bộ này. ` +
-            `Bản cục bộ được GIỮ NGUYÊN ở \`${path}\` (và đã đẩy đè lên ${provider.name}); ` +
-            `nội dung bản ${provider.name} (bị thay thế) được lưu lại bên dưới để bạn đối chiếu:\n\n---\n\n` +
-            (text ?? "*(nội dung nhị phân, không hiển thị được dạng văn bản)*");
-          await spaceOps.writeFile(cPath, new TextEncoder().encode(body));
-          report.conflicts.push(path);
-
-          const localData = await spaceOps.readFile(path);
-          const result = await provider.upload(folder, path, localData, {
-            tag: "update",
-            rev: remote.rev,
-          });
-          nextState[path] = { localMtime: local.lastModified, remoteRev: result.rev };
+          await resolveConflict(path, local, remote, dl.data);
           await checkpoint();
           continue;
         }

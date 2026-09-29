@@ -314,6 +314,36 @@ describe("performSync (generic, over any SyncProvider)", () => {
     expect(dec(await space.readFile(conflictFileName!))).toContain("remote edit");
   });
 
+  test("first sync where BOTH sides already have the same path with different content -> conflict file, not a silent overwrite of the remote", async () => {
+    const space = new FakeSpace();
+    space.put("game.md", "local version", 500);
+    provider.seedRemote("game.md", "cloud version", "rev1");
+
+    const report = await performSync(provider, "", space);
+
+    expect(report.conflicts).toEqual(["game.md"]);
+    expect(dec(await space.readFile("game.md"))).toBe("local version");
+    const conflictFileName = [...space.files.keys()].find((k) => k.includes(".conflict-"));
+    expect(conflictFileName).toBeDefined();
+    expect(dec(await space.readFile(conflictFileName!))).toContain("cloud version");
+    expect(provider.uploadCalls).toEqual([
+      { folder: "", path: "game.md", data: enc("local version"), mode: { tag: "update", rev: "rev1" } },
+    ]);
+  });
+
+  test("first sync where both sides already hold identical content -> records state, uploads nothing, no conflict", async () => {
+    const space = new FakeSpace();
+    space.put("game.md", "same text", 500);
+    provider.seedRemote("game.md", "same text", "rev1");
+
+    const report = await performSync(provider, "", space);
+
+    expect(report.conflicts).toEqual([]);
+    expect(provider.uploadCalls).toEqual([]);
+    const state = JSON.parse(dec(await space.readFile("_sync/fake-state.json")));
+    expect(state["game.md"]).toEqual({ localMtime: 500, remoteRev: "rev1" });
+  });
+
   test("an upload failure partway through the loop does not lose the state already checkpointed for earlier paths", async () => {
     const space = new FakeSpace();
     space.put("a.md", "a"); // xử lý trước, phải thành công
